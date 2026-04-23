@@ -88,13 +88,13 @@ export default function UploadPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Upload CSV</h1>
+      <h1 className="text-2xl font-semibold mb-6">Upload CSV</h1>
 
       <div
         className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors cursor-pointer ${
           dragOver
-            ? "border-blue-500 bg-blue-50"
-            : "border-gray-300 hover:border-gray-400"
+            ? "border-garbe-grun bg-garbe-grun-40/30"
+            : "border-garbe-blau-60 hover:border-garbe-blau-40"
         }`}
         onDragOver={(e) => {
           e.preventDefault();
@@ -114,10 +114,10 @@ export default function UploadPage() {
 
         {state.phase === "idle" && (
           <div>
-            <p className="text-gray-600 text-lg mb-2">
+            <p className="text-garbe-blau-80 text-lg mb-2">
               Drop a Mieterliste CSV file here, or click to select
             </p>
-            <p className="text-gray-400 text-sm">
+            <p className="text-garbe-blau-40 text-sm">
               GARBE format, semicolon-delimited, latin-1 encoded
             </p>
           </div>
@@ -126,14 +126,14 @@ export default function UploadPage() {
         {state.phase === "uploading" && (
           <div className="flex items-center justify-center gap-3">
             <Spinner />
-            <p className="text-gray-600">Uploading...</p>
+            <p className="text-garbe-blau-80">Uploading...</p>
           </div>
         )}
 
         {state.phase === "processing" && (
           <div className="flex items-center justify-center gap-3">
             <Spinner />
-            <p className="text-gray-600">
+            <p className="text-garbe-blau-80">
               Parsing CSV (upload #{state.uploadId})...
             </p>
           </div>
@@ -141,12 +141,12 @@ export default function UploadPage() {
 
         {state.phase === "error" && (
           <div>
-            <p className="text-red-600 font-medium mb-2">Error</p>
-            <p className="text-red-500 text-sm max-w-lg mx-auto whitespace-pre-wrap">
+            <p className="text-garbe-rot font-semibold mb-2">Error</p>
+            <p className="text-garbe-rot/80 text-sm max-w-lg mx-auto whitespace-pre-wrap">
               {state.message}
             </p>
             <button
-              className="mt-4 text-blue-600 hover:underline text-sm"
+              className="mt-4 text-garbe-blau hover:underline text-sm font-semibold"
               onClick={(e) => {
                 e.stopPropagation();
                 setState({ phase: "idle" });
@@ -159,12 +159,12 @@ export default function UploadPage() {
 
         {state.phase === "complete" && (
           <div>
-            <p className="text-green-600 font-medium text-lg mb-3">
+            <p className="text-garbe-grun font-semibold text-lg mb-3">
               Upload complete
             </p>
             <UploadSummary detail={state.detail} />
             <button
-              className="mt-4 text-blue-600 hover:underline text-sm"
+              className="mt-4 text-garbe-blau hover:underline text-sm font-semibold"
               onClick={(e) => {
                 e.stopPropagation();
                 setState({ phase: "idle" });
@@ -178,44 +178,47 @@ export default function UploadPage() {
 
       {uploads.length > 0 && (
         <div className="mt-10">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Previous Uploads
-          </h2>
-          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <h2 className="text-lg font-semibold mb-4">Previous Uploads</h2>
+          <div className="bg-white rounded-lg border border-garbe-neutral overflow-hidden">
+            <table className="min-w-full divide-y divide-garbe-neutral">
+              <thead className="bg-garbe-blau-20/40">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-garbe-blau uppercase tracking-wider">
                     ID
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-garbe-blau uppercase tracking-wider">
                     Filename
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-garbe-blau uppercase tracking-wider">
                     Stichtag
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-garbe-blau uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-garbe-blau uppercase tracking-wider">
                     Rows
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
-                {uploads.map((u) => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-700">{u.id}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900 font-medium">
+              <tbody className="divide-y divide-garbe-neutral">
+                {uploads.map((u, i) => (
+                  <tr
+                    key={u.id}
+                    className={`hover:bg-garbe-neutral/50 ${i % 2 === 1 ? "bg-garbe-offwhite" : "bg-white"}`}
+                  >
+                    <td className="px-4 py-3 text-sm text-garbe-blau-80">
+                      {u.id}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-garbe-blau font-medium">
                       {u.filename}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
+                    <td className="px-4 py-3 text-sm text-garbe-blau-60">
                       {u.stichtag || "—"}
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <StatusBadge status={u.status} />
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600 text-right">
+                    <td className="px-4 py-3 text-sm text-garbe-blau-60 text-right">
                       {u.row_count?.toLocaleString() ?? "—"}
                     </td>
                   </tr>
@@ -232,28 +235,30 @@ export default function UploadPage() {
 function UploadSummary({ detail }: { detail: UploadDetail }) {
   return (
     <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm text-left max-w-md mx-auto">
-      <div className="text-gray-500">Stichtag</div>
-      <div className="text-gray-900 font-medium">{detail.stichtag}</div>
-      <div className="text-gray-500">Fund</div>
-      <div className="text-gray-900 font-medium">{detail.fund_label}</div>
-      <div className="text-gray-500">Total rows</div>
-      <div className="text-gray-900 font-medium">
+      <div className="text-garbe-blau-60">Stichtag</div>
+      <div className="text-garbe-blau font-medium">{detail.stichtag}</div>
+      <div className="text-garbe-blau-60">Fund</div>
+      <div className="text-garbe-blau font-medium">{detail.fund_label}</div>
+      <div className="text-garbe-blau-60">Total rows</div>
+      <div className="text-garbe-blau font-medium">
         {detail.row_count?.toLocaleString()}
       </div>
-      <div className="text-gray-500">Data rows</div>
-      <div className="text-gray-900 font-medium">
+      <div className="text-garbe-blau-60">Data rows</div>
+      <div className="text-garbe-blau font-medium">
         {detail.data_row_count?.toLocaleString()}
       </div>
-      <div className="text-gray-500">Properties</div>
-      <div className="text-gray-900 font-medium">
+      <div className="text-garbe-blau-60">Properties</div>
+      <div className="text-garbe-blau font-medium">
         {detail.summary_row_count}
       </div>
-      <div className="text-gray-500">Orphan rows</div>
-      <div className="text-gray-900 font-medium">{detail.orphan_row_count}</div>
+      <div className="text-garbe-blau-60">Orphan rows</div>
+      <div className="text-garbe-blau font-medium">
+        {detail.orphan_row_count}
+      </div>
       {detail.parser_warnings_json && detail.parser_warnings_json.length > 0 && (
         <>
-          <div className="text-gray-500">Warnings</div>
-          <div className="text-amber-600 font-medium">
+          <div className="text-garbe-blau-60">Warnings</div>
+          <div className="text-garbe-ocker font-medium">
             {detail.parser_warnings_json.length}
           </div>
         </>
@@ -263,15 +268,15 @@ function UploadSummary({ detail }: { detail: UploadDetail }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    complete: "bg-green-100 text-green-700",
-    processing: "bg-blue-100 text-blue-700",
-    error: "bg-red-100 text-red-700",
+  const styles: Record<string, string> = {
+    complete: "bg-garbe-grun-40/50 text-garbe-grun",
+    processing: "bg-garbe-turkis/10 text-garbe-turkis",
+    error: "bg-garbe-rot/10 text-garbe-rot",
   };
   return (
     <span
-      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
-        colors[status] || "bg-gray-100 text-gray-700"
+      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${
+        styles[status] || "bg-garbe-neutral text-garbe-blau-60"
       }`}
     >
       {status}
@@ -282,7 +287,7 @@ function StatusBadge({ status }: { status: string }) {
 function Spinner() {
   return (
     <svg
-      className="animate-spin h-5 w-5 text-blue-600"
+      className="animate-spin h-5 w-5 text-garbe-grun"
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
