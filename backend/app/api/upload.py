@@ -32,7 +32,7 @@ def set_session_factory(factory):
 def _process_upload(upload_id: int, file_content: bytes, filename: str):
     db = get_session_factory()()
     try:
-        upload = db.query(CsvUpload).get(upload_id)
+        upload = db.get(CsvUpload, upload_id)
         if not upload:
             return
 
@@ -102,7 +102,7 @@ def _process_upload(upload_id: int, file_content: bytes, filename: str):
 
     except Exception as e:
         db.rollback()
-        upload = db.query(CsvUpload).get(upload_id)
+        upload = db.get(CsvUpload, upload_id)
         if upload:
             upload.status = "error"
             upload.error_message = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
@@ -154,7 +154,7 @@ def list_uploads(db: Session = Depends(get_db)):
 
 @router.get("/uploads/{upload_id}", response_model=UploadDetail)
 def get_upload(upload_id: int, db: Session = Depends(get_db)):
-    upload = db.query(CsvUpload).get(upload_id)
+    upload = db.get(CsvUpload, upload_id)
     if not upload:
         raise HTTPException(404, "Upload not found")
     return upload
@@ -170,7 +170,7 @@ def get_upload_rows(
     limit: int = 100,
     db: Session = Depends(get_db),
 ):
-    upload = db.query(CsvUpload).get(upload_id)
+    upload = db.get(CsvUpload, upload_id)
     if not upload:
         raise HTTPException(404, "Upload not found")
 
@@ -215,7 +215,7 @@ def get_upload_rows(
 
 @router.delete("/uploads/{upload_id}")
 def delete_upload(upload_id: int, db: Session = Depends(get_db)):
-    upload = db.query(CsvUpload).get(upload_id)
+    upload = db.get(CsvUpload, upload_id)
     if not upload:
         raise HTTPException(404, "Upload not found")
     db.delete(upload)
