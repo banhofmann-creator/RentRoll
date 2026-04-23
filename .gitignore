@@ -1,0 +1,73 @@
+# === Python ===
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test / coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Type checkers
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Ruff
+.ruff_cache/
+
+# === Node / Next.js ===
+node_modules/
+.next/
+out/
+.turbo/
+
+# === Environment & secrets ===
+.env
+.env.*
+!.env.example
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Database ===
+*.sqlite3
+*.sqlite3-journal
+
+# === Project-specific ===
+
+# Uploads (keep directory, ignore uploaded files)
+uploads/*
+!uploads/.gitkeep
+
+# Generated exports
+exports/
+
+# Claude Code local settings
+.claude/
