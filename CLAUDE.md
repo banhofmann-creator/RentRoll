@@ -46,6 +46,60 @@ cd frontend
 npm test
 ```
 
+## Collaboration Workflow
+
+Use this file as the shared repo contract across coding agents. Keep durable project rules here, and keep task-specific intent in the active prompt.
+
+Recommended split when multiple agents are involved:
+- Claude Code: shape the approach, handle repo-native workflows, and implement when appropriate.
+- Codex: perform focused review, run targeted validation, inspect diffs for regressions, and handle precise follow-up fixes.
+
+When Claude Code completes a non-trivial change, explicitly call on Codex for review before treating the work as done. That review should focus on:
+- behavioral regressions
+- edge cases and missing validation
+- tests that should be added or updated
+- multi-file consistency with the architecture and domain rules in this file
+
+When both agents are used in the same task:
+- avoid editing the same files concurrently unless ownership is explicit
+- keep one agent in implementation mode and the other in review mode
+- record any durable workflow changes back into this file rather than only in chat
+
+### Plan/Review Status Baseline (as of 2026-04-23)
+
+- `planning/PLAN.md` is the target blueprint and phase definition (Phases 1-9).
+- `planning/Review.md` is the execution log. It currently marks:
+  - `Phase 1: Foundation & CSV Ingestion` as `Complete` (dated 2026-04-23)
+  - `Design System: GARBE Industrial Branding` as `Complete` (dated 2026-04-23)
+- Treat phases 2-9 as not yet complete unless `planning/Review.md` says otherwise.
+
+### Post-Codex Review Checklist (Claude Code)
+
+After Codex completes a change, Claude Code should review and confirm:
+- The change maps to one or more explicit bullets in the relevant phase in `planning/PLAN.md`.
+- `planning/Review.md` is updated with status, date, changed files, and validation/test evidence for the phase work that was done.
+- Domain-rule compliance for CSV handling and aggregations in this file (orphan inheritance, LEERSTAND handling, PV handling, USE_TYPE_PRIMARY logic, lease-expiry bucketing).
+- Snapshot/reporting-period behavior is preserved when touching export or historical data paths.
+- Tests are added/updated for behavior changes, and commands/results are recorded in the review notes.
+- Remaining gaps are listed as concrete follow-up items tied to a PLAN.md phase.
+
+### Automatic Handoff Command (Claude Code -> Codex)
+
+After non-trivial code changes are applied, run:
+
+```bash
+cmd /c .claude\codex-post-change-review.cmd
+```
+
+Behavior:
+- Skips review when there are no uncommitted changes.
+- Runs `codex review --uncommitted`.
+- Writes a timestamped review report to `planning/reviews/codex-review-YYYYMMDD-HHMMSS.md`.
+
+Review focus guidance is maintained in `.claude/codex-review-prompt.txt` for Claude/Codex handoff consistency, even though this Codex CLI path does not accept a custom prompt together with `--uncommitted`.
+
+Claude Code should treat this handoff as required before declaring implementation complete.
+
 ## CSV Parsing Rules
 
 The GARBE CSV has 10 header rows before data. Row types are classified by `col[0]`:
