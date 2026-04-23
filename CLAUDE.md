@@ -121,4 +121,16 @@ Numbers use `'` (apostrophe) as thousands separator — strip before parsing. Da
 
 Test everything. If errors occur, reproduce and fix until tests come back clean. Sample data files are in `samples/` for use in tests.
 
-@planning/PLAN.md
+## Planning Documents
+
+`planning/PLAN.md` is the master blueprint (phases 1-9, risks, overview). Detailed specs are in separate files — read on-demand, not auto-loaded:
+
+| File | When to read |
+|---|---|
+| `planning/spec-columns.md` | Parsing, aggregation, or export work (CSV 61-col + BVI 144-col mappings) |
+| `planning/spec-schema.md` | Any database work (all table definitions) |
+| `planning/spec-transforms.md` | Parsing, validation, or transformation logic |
+| `planning/spec-architecture.md` | Architectural decisions (tech stack, modules, plugins) |
+| `planning/spec-features.md` | Feature work (export, inconsistencies, chatbot, asset mgmt) |
+| `planning/spec-snapshots.md` | Reporting periods, snapshots, time-series |
+| `planning/spec-design-system.md` | Frontend styling (GARBE colors, typography, components) |
