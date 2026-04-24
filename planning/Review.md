@@ -179,3 +179,63 @@ planning/reviews/codex-review-20260424-101031.md (new — Codex review report)
 
 - Cross-upload diff detection (new/removed tenants, rent changes) — requires multiple uploads of different periods.
 - Side-by-side DiffPreview component for resolution workflow.
+
+---
+
+## Phase 3A: CRUD APIs + Mapping UI
+
+**Status:** Complete  
+**Date:** 2026-04-24
+
+### What was built
+
+- **Audit utility** (`backend/app/core/audit.py`): Field-level change tracking via `MasterDataAudit` table. Functions: `log_changes` (compares old/new dicts, creates entry per changed field), `log_creation`, `log_deletion`, `snapshot` (extracts field dict from ORM object). Serializes None/datetime/date/Decimal to strings.
+- **Pydantic schemas** (`backend/app/models/schemas.py`): 15 new schema classes — Fund (Create/Update/Response), Tenant (AliasCreate/AliasResponse, MasterCreate with `initial_alias` convenience field, MasterUpdate, MasterResponse with nested aliases), Property (Create with ~40 optional fields, Update, Response), UnmappedItem.
+- **CRUD API** (`backend/app/api/master_data.py`): Single router for all three entity types. Fund endpoints (list/create/update/delete), Tenant endpoints (list with alias join search, create with optional initial_alias, detail, update, delete with cascade, add/remove alias), Property endpoints (list/create/detail/partial update/delete), Unmapped endpoint (groups open inconsistencies by entity_id).
+- **Auto-resolution**: Creating a fund mapping auto-resolves `unmapped_fund` inconsistencies. Adding a tenant alias auto-resolves `unmapped_tenant`. Creating a property auto-resolves `missing_metadata`. Uses `_resolve_inconsistencies(db, category, entity_id)` bulk-update helper.
+- **Frontend API client** (`frontend/src/lib/api.ts`): 5 interfaces + 15 fetch functions for all CRUD operations.
+- **Frontend page** (`frontend/src/app/master-data/page.tsx`): Tab bar (Funds/Tenants/Properties) with GARBE styling. Each tab has unmapped banner (garbe-rot for errors, garbe-ocker for warnings, quick-create buttons), search, data table, create/edit modals, inline alias management for tenants.
+- **Nav link** (`frontend/src/app/layout.tsx`): Added "Master Data" link after "Quality".
+- **Form styling** (`frontend/src/app/globals.css`): Added `.form-input` CSS class.
+
+### Codex review findings (fixed)
+
+| Finding | Severity | Fix |
+|---|---|---|
+| Duplicate initial aliases not rejected in `create_tenant` | P1 | Added alias uniqueness check before insert |
+| Duplicate BVI tenant IDs cause unhandled 500 | P2 | Added `IntegrityError` handling with rollback and 400 response |
+| Edit forms can't clear optional fields (blank → `undefined` → dropped) | P2 | Changed update handlers to send `null` instead of `undefined`; updated TypeScript types to accept `string \| null` |
+| Alias creations not audited (only deletions were) | P3 | Added `log_creation` call for both `add_alias` and `initial_alias` paths |
+
+### Test coverage
+
+**111 tests passing** (73 existing + 38 new):
+
+- `test_audit.py` (6 tests): log_changes detects diffs, ignores unchanged, handles types (date/Decimal/None), log_creation records non-None, log_deletion records non-None, snapshot captures fields.
+- `test_master_data_api.py` (32 tests): Fund CRUD (create, duplicate rejection, list, search, update, update_not_found, delete, auto-resolve inconsistency), Tenant CRUD (create, create with alias, duplicate initial alias rejection, duplicate BVI ID rejection, list, search canonical, search by alias, detail, update, delete cascades, add/remove alias, alias duplicate rejection, auto-resolve inconsistency), Property CRUD (create, duplicate, list, search city, partial update, delete, auto-resolve inconsistency), Unmapped (grouped, filter by type), Audit (update creates entries with correct old/new values).
+
+### Files changed
+
+```
+backend/app/core/audit.py                     (new)
+backend/app/api/master_data.py                (new)
+backend/tests/test_audit.py                   (new)
+backend/tests/test_master_data_api.py         (new)
+frontend/src/app/master-data/page.tsx         (new)
+backend/app/models/schemas.py                 (modified — 15 new schemas)
+backend/app/main.py                           (modified — master_data router)
+frontend/src/lib/api.ts                       (modified — 5 interfaces, 15 functions)
+frontend/src/app/layout.tsx                   (modified — Master Data nav link)
+frontend/src/app/globals.css                  (modified — .form-input class)
+CLAUDE.md                                     (modified — Review.md mandatory update rule)
+planning/reviews/codex-review-20260424-phase3a.md (new — Codex review report)
+```
+
+### Deferred to Phase 3B
+
+- BVI G2 XLSX importer
+- AG Grid for data browser
+- Excel roundtrip (export/import)
+- Completeness dashboard
+- Fuzzy tenant/fund matching suggestions
+- Single-property detail form (full 40-field editing)

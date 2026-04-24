@@ -39,3 +39,17 @@ h3, h4 {
   letter-spacing: 0.045em;
   color: var(--color-garbe-blau);
 }
+
+.form-input {
+  border: 1px solid var(--color-garbe-neutral);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  background: white;
+  color: var(--color-garbe-blau);
+}
+
+.form-input:focus {
+  border-color: var(--color-garbe-blau-60);
+  outline: none;
+}

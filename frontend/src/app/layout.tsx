@@ -49,6 +49,12 @@ export default function RootLayout({
                 >
                   Quality
                 </Link>
+                <Link
+                  href="/master-data"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Master Data
+                </Link>
               </div>
             </div>
           </div>

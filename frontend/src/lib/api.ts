@@ -88,6 +88,267 @@ export interface InconsistencySummary {
   has_blocking_errors: boolean;
 }
 
+// --- Master Data Types ---
+
+export interface FundMapping {
+  id: number;
+  csv_fund_name: string;
+  bvi_fund_id: string | null;
+  description: string | null;
+}
+
+export interface TenantAlias {
+  id: number;
+  tenant_master_id: number;
+  csv_tenant_name: string;
+  property_id: string | null;
+}
+
+export interface TenantMaster {
+  id: number;
+  bvi_tenant_id: string | null;
+  tenant_name_canonical: string;
+  nace_sector: string | null;
+  pd_min: number | null;
+  pd_max: number | null;
+  notes: string | null;
+  aliases: TenantAlias[];
+}
+
+export interface PropertyMaster {
+  id: number;
+  property_id: string;
+  fund_csv_name: string | null;
+  city: string | null;
+  street: string | null;
+  zip_code: string | null;
+  country: string | null;
+  region: string | null;
+  fair_value: number | null;
+  [key: string]: unknown;
+}
+
+export interface UnmappedItem {
+  entity_type: string;
+  entity_id: string;
+  upload_count: number;
+  inconsistency_ids: number[];
+}
+
+// --- Fund Mapping API ---
+
+export async function listFundMappings(params?: {
+  search?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<FundMapping[]> {
+  const sp = new URLSearchParams();
+  if (params?.search) sp.set("search", params.search);
+  if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+  if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+  const res = await fetch(`${API_BASE}/api/master-data/funds?${sp.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch funds");
+  return res.json();
+}
+
+export async function createFundMapping(body: {
+  csv_fund_name: string;
+  bvi_fund_id?: string;
+  description?: string;
+}): Promise<FundMapping> {
+  const res = await fetch(`${API_BASE}/api/master-data/funds`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Create failed" }));
+    throw new Error(err.detail || "Create failed");
+  }
+  return res.json();
+}
+
+export async function updateFundMapping(
+  id: number,
+  body: { bvi_fund_id?: string | null; description?: string | null }
+): Promise<FundMapping> {
+  const res = await fetch(`${API_BASE}/api/master-data/funds/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to update fund");
+  return res.json();
+}
+
+export async function deleteFundMapping(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/master-data/funds/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete fund");
+}
+
+// --- Tenant API ---
+
+export async function listTenants(params?: {
+  search?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<TenantMaster[]> {
+  const sp = new URLSearchParams();
+  if (params?.search) sp.set("search", params.search);
+  if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+  if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+  const res = await fetch(
+    `${API_BASE}/api/master-data/tenants?${sp.toString()}`
+  );
+  if (!res.ok) throw new Error("Failed to fetch tenants");
+  return res.json();
+}
+
+export async function createTenant(body: {
+  tenant_name_canonical: string;
+  bvi_tenant_id?: string;
+  nace_sector?: string;
+  initial_alias?: string;
+}): Promise<TenantMaster> {
+  const res = await fetch(`${API_BASE}/api/master-data/tenants`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Create failed" }));
+    throw new Error(err.detail || "Create failed");
+  }
+  return res.json();
+}
+
+export async function updateTenant(
+  id: number,
+  body: {
+    tenant_name_canonical?: string;
+    bvi_tenant_id?: string | null;
+    nace_sector?: string | null;
+  }
+): Promise<TenantMaster> {
+  const res = await fetch(`${API_BASE}/api/master-data/tenants/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to update tenant");
+  return res.json();
+}
+
+export async function deleteTenant(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/master-data/tenants/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete tenant");
+}
+
+export async function addTenantAlias(
+  tenantId: number,
+  body: { csv_tenant_name: string; property_id?: string }
+): Promise<TenantAlias> {
+  const res = await fetch(
+    `${API_BASE}/api/master-data/tenants/${tenantId}/aliases`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Add alias failed" }));
+    throw new Error(err.detail || "Add alias failed");
+  }
+  return res.json();
+}
+
+export async function removeTenantAlias(
+  tenantId: number,
+  aliasId: number
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/master-data/tenants/${tenantId}/aliases/${aliasId}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error("Failed to remove alias");
+}
+
+// --- Property API ---
+
+export async function listProperties(params?: {
+  search?: string;
+  offset?: number;
+  limit?: number;
+}): Promise<PropertyMaster[]> {
+  const sp = new URLSearchParams();
+  if (params?.search) sp.set("search", params.search);
+  if (params?.offset !== undefined) sp.set("offset", String(params.offset));
+  if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+  const res = await fetch(
+    `${API_BASE}/api/master-data/properties?${sp.toString()}`
+  );
+  if (!res.ok) throw new Error("Failed to fetch properties");
+  return res.json();
+}
+
+export async function createProperty(body: {
+  property_id: string;
+  fund_csv_name?: string;
+  city?: string;
+  street?: string;
+  country?: string;
+  [key: string]: unknown;
+}): Promise<PropertyMaster> {
+  const res = await fetch(`${API_BASE}/api/master-data/properties`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Create failed" }));
+    throw new Error(err.detail || "Create failed");
+  }
+  return res.json();
+}
+
+export async function updateProperty(
+  id: number,
+  body: Record<string, unknown>
+): Promise<PropertyMaster> {
+  const res = await fetch(`${API_BASE}/api/master-data/properties/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to update property");
+  return res.json();
+}
+
+export async function deleteProperty(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/master-data/properties/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete property");
+}
+
+// --- Unmapped ---
+
+export async function listUnmapped(
+  entityType?: string
+): Promise<UnmappedItem[]> {
+  const sp = entityType ? `?entity_type=${entityType}` : "";
+  const res = await fetch(`${API_BASE}/api/master-data/unmapped${sp}`);
+  if (!res.ok) throw new Error("Failed to fetch unmapped items");
+  return res.json();
+}
+
+// --- Inconsistency API ---
+
 export async function listInconsistencies(params?: {
   upload_id?: number;
   category?: string;

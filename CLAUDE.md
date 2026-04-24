@@ -46,6 +46,18 @@ cd frontend
 npm test
 ```
 
+## Review.md — Mandatory Update
+
+`planning/Review.md` is the execution log. After every non-trivial change (new feature, bug fix, refactor — not typo fixes or config tweaks), update it before considering the work done. Each entry should include:
+- **Status** and **Date**
+- **What was built** — files created/modified, key technical details
+- **Codex review findings** (if review was run) — what was found and how it was fixed
+- **Test coverage** — test count, what's covered
+- **Files changed** — inventory of new and modified files
+- **Deferred items** — anything explicitly left for later
+
+This is as important as the commit itself — it's how future sessions (and other agents) pick up context without re-deriving it from git history.
+
 ## Collaboration Workflow
 
 Use this file as the shared repo contract across coding agents. Keep durable project rules here, and keep task-specific intent in the active prompt.
