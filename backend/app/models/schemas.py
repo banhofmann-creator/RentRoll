@@ -69,3 +69,38 @@ class ParseStats(BaseModel):
     funds: list[str]
     properties: int
     warnings: list[str]
+
+
+class InconsistencyListItem(BaseModel):
+    id: int
+    upload_id: int
+    category: str
+    severity: str
+    entity_type: str | None
+    entity_id: str | None
+    field_name: str | None
+    expected_value: str | None
+    actual_value: str | None
+    deviation_pct: float | None
+    description: str
+    status: str
+    resolution_note: str | None
+    resolved_by: str | None
+    resolved_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class InconsistencyUpdate(BaseModel):
+    status: str
+    resolution_note: str | None = None
+    resolved_by: str | None = None
+
+
+class InconsistencySummary(BaseModel):
+    total: int
+    by_severity: dict[str, int]
+    by_category: dict[str, int]
+    by_status: dict[str, int]
+    has_blocking_errors: bool

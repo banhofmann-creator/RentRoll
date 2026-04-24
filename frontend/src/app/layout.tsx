@@ -43,6 +43,12 @@ export default function RootLayout({
                 >
                   Data
                 </Link>
+                <Link
+                  href="/inconsistencies"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Quality
+                </Link>
               </div>
             </div>
           </div>

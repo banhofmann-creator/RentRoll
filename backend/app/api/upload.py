@@ -97,6 +97,10 @@ def _process_upload(upload_id: int, file_content: bytes, filename: str):
                 status="open",
             ))
 
+        from app.core.inconsistency_detector import detect_inconsistencies
+        detected = detect_inconsistencies(db, upload_id)
+        db.add_all(detected)
+
         upload.status = "complete"
         db.commit()
 
