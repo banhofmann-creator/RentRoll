@@ -123,3 +123,59 @@ Applied GARBE Industrial Design Manual to the frontend. Key changes:
 - **Landing page:** Green dot accent on "RentRoll." headline.
 
 Build verified clean (all 4 routes compile, 47 backend tests pass).
+
+---
+
+## Phase 2: Inconsistency Detection & Resolution
+
+**Status:** Complete  
+**Date:** 2026-04-24
+
+### What was built
+
+- **Detection engine** (`backend/app/core/inconsistency_detector.py`): Top-level `detect_inconsistencies(db, upload_id)` function that idempotently detects 4 categories of data quality issues:
+  - `aggregation_mismatch` (warning): Compares SUM of data/orphan rows per property against summary row values for area, annual/monthly rent, parking, market rent, ERV. Tolerance >1%. Summary rows have property_id in the `fund` field (col[0]) extracted via regex `^\d{2,4}\s*-\s*`.
+  - `unmapped_tenant` (error): Tenants with no entry in `tenant_name_alias`. LEERSTAND excluded.
+  - `unmapped_fund` (error): Funds with no entry in `fund_mapping`.
+  - `missing_metadata` (warning): Properties with no entry in `property_master`.
+- **Upload integration** (`backend/app/api/upload.py`): Detection runs automatically after CSV parsing in `_process_upload()`.
+- **Pydantic schemas** (`backend/app/models/schemas.py`): `InconsistencyListItem`, `InconsistencyUpdate`, `InconsistencySummary`.
+- **REST API** (`backend/app/api/inconsistencies.py`): `GET /inconsistencies` (paginated, filterable by upload_id/category/severity/status), `GET /inconsistencies/summary` (counts + has_blocking_errors), `GET /inconsistencies/{id}`, `PATCH /inconsistencies/{id}` (resolve/acknowledge/ignore), `POST /inconsistencies/{upload_id}/recheck`.
+- **Frontend quality page** (`frontend/src/app/inconsistencies/page.tsx`): Upload selector, 4 summary cards (errors/warnings/info/resolved), export readiness banner, filter dropdowns (category/severity/status), paginated table with severity/category/status badges, resolution modal with action selector and note field.
+- **Frontend API client** (`frontend/src/lib/api.ts`): Added `InconsistencyItem`, `InconsistencySummary` interfaces and `listInconsistencies`, `getInconsistencySummary`, `updateInconsistency`, `recheckInconsistencies` functions.
+- **Nav link** (`frontend/src/app/layout.tsx`): Added "Quality" link after "Data".
+
+### Codex review findings (fixed)
+
+| Finding | Severity | Fix |
+|---|---|---|
+| Zero-vs-nonzero aggregation mismatches silently skipped | P1 | Now flagged with 100% deviation instead of being skipped |
+| Pagination order non-deterministic when `created_at` ties | P2 | Added secondary sort by `id DESC` |
+
+### Test coverage
+
+**73 tests passing** (47 existing + 26 new):
+
+- `test_inconsistency_detector.py` (11 tests): No false positives on real data, unmapped tenants/funds/properties detected, LEERSTAND excluded, mapped entities not flagged, re-run idempotency, synthetic aggregation mismatch, zero-vs-nonzero mismatch.
+- `test_inconsistency_api.py` (15 tests): List/filter/summary endpoints, get single/not-found, resolve/acknowledge/ignore actions, invalid status rejection, blocking errors cleared after resolve, recheck endpoint, pagination.
+
+### Files changed
+
+```
+backend/app/core/inconsistency_detector.py    (new)
+backend/app/api/inconsistencies.py            (new)
+backend/tests/test_inconsistency_detector.py  (new)
+backend/tests/test_inconsistency_api.py       (new)
+frontend/src/app/inconsistencies/page.tsx     (new)
+backend/app/api/upload.py                     (modified — detection call)
+backend/app/main.py                           (modified — router registration)
+backend/app/models/schemas.py                 (modified — 3 new schemas)
+frontend/src/lib/api.ts                       (modified — 4 functions, 2 interfaces)
+frontend/src/app/layout.tsx                   (modified — Quality nav link)
+planning/reviews/codex-review-20260424-101031.md (new — Codex review report)
+```
+
+### Deferred to later
+
+- Cross-upload diff detection (new/removed tenants, rent changes) — requires multiple uploads of different periods.
+- Side-by-side DiffPreview component for resolution workflow.
