@@ -420,3 +420,80 @@ Tests cover:
 
 - G2 column sub-groups in frontend (rent by type, ERV breakdown) — only showing summary columns in preview; full 144-column view deferred to export phase
 - Validation auto-creation of DataInconsistency records — currently returns issues but doesn't persist them; will integrate with inconsistency workflow in Phase 5
+
+---
+
+## Phase 5: Reporting Period Management & BVI Export
+
+**Status:** Complete  
+**Date:** 2026-04-25
+
+### What was built
+
+- **Reporting Period API** (`backend/app/api/periods.py`): Full CRUD for reporting periods plus finalization workflow:
+  - `POST /api/periods` — create draft period from a completed upload (enforces one period per stichtag)
+  - `GET /api/periods` / `GET /api/periods/{id}` — list and detail
+  - `DELETE /api/periods/{id}` — delete draft periods only (finalized periods protected)
+  - `GET /api/periods/{id}/finalize-check` — pre-flight check: counts blocking errors, unmapped tenants/funds, property field completeness percentage, returns warnings list and `can_finalize` boolean
+  - `POST /api/periods/{id}/finalize` — snapshots all master data (property, tenant, alias, fund) into snapshot tables, sets status to "finalized" with timestamp
+  - `GET /api/periods/{id}/export` — streams BVI XLSX (draft or finalized), filename includes DRAFT suffix for unfinalised periods
+
+- **Snapshot engine** (`_create_snapshot()` in periods.py): Copies all `PropertyMaster`, `TenantMaster`, `TenantNameAlias`, and `FundMapping` records into their snapshot counterparts, preserving all fields and creating `tenant_id_map` for alias FK remapping. Returns counts per entity type.
+
+- **BVI XLSX export engine** (`backend/app/core/bvi_export.py`): Generates the exact BVI Target Tables format:
+  - Z1 sheet: 11-row header block with BVI codes, type annotations, and group headers; data from row 12
+  - G2 sheet: 144-column layout with all field groups (identity, address, green building, ownership, valuation, floor area, parking, debt, rents by type, ERV, let/vacant rent, lease expiry, ESG/CRREM, tech specs, reversion)
+  - Draft watermark ("PROVISIONAL - NOT FINALIZED") in row 1 for unfinalised periods
+  - Proper openpyxl 1-based column indexing throughout (off-by-one bug identified and fixed)
+  - Special handling for lease expiry buckets, open-ended leases, and CRREM floor area sub-fields
+
+- **Frontend periods page** (`frontend/src/app/periods/page.tsx`): Full period management UI with:
+  - Period table showing stichtag, status badge (draft/finalized), upload reference, timestamps
+  - "New Period" modal with upload selector (filters to available completed uploads)
+  - "Finalize" flow: runs finalize-check first, shows blocking errors/unmapped counts/completeness with color-coded pass/fail indicators, warnings panel, then confirm button (disabled if can_finalize is false)
+  - "Delete" confirmation modal for draft periods
+  - "Export" download link for any period
+  - GARBE design system throughout (garbe-blau, garbe-grun, garbe-ocker, garbe-rot)
+
+- **API client** (`frontend/src/lib/api.ts`): Added `Period`, `FinalizeCheck`, `FinalizeResult` interfaces and 7 functions: `listPeriods`, `createPeriod`, `getPeriod`, `deletePeriod`, `getFinalizeCheck`, `finalizePeriod`, `periodExportUrl`
+
+### Key technical decisions
+
+| Decision | Rationale |
+|---|---|
+| 0-indexed field map arrays with `col_idx + 1` for openpyxl | Matches G2_LABELS/G2_FIELD_MAP structure (index 0 = None placeholder for col A); consistent with header writing loops |
+| CRREM key lookup via `col_idx - 120` (0-based) | CRREM fields start at G2_FIELD_MAP[120]; indexes directly into 0-based CRREM_KEYS array |
+| Finalize-check as separate GET endpoint | Allows preview before committing; frontend can show warnings without triggering snapshot |
+| Snapshot copies all fields dynamically | `PropertyMaster.__table__.columns` iteration avoids manual field listing; future fields auto-included |
+| Period-per-stichtag uniqueness | Prevents duplicate periods; enforced at API level with 409 response |
+
+### Bug fixes
+
+- **Off-by-one in G2 data writing**: `enumerate(G2_FIELD_MAP)` produces 0-based indices but openpyxl cells are 1-based. Fixed by using `col_idx + 1` in both header loops and data writing loop.
+
+### Test coverage
+
+16 tests in `test_periods.py` — all passing:
+- Period CRUD: create, duplicate (409), incomplete upload (400), list, get, delete draft, delete finalized rejected (400)
+- Finalization: check clean (can_finalize=True), check with errors (can_finalize=False), creates snapshots (verifies counts + DB records), finalize twice rejected (400)
+- Export: draft (PROVISIONAL watermark, correct data cells), finalized (no watermark), G2 headers (correct labels at expected columns), lease expiry columns, not found (404)
+
+Full suite: 187 tests passing, no regressions.
+
+### Files changed
+
+| File | Action |
+|---|---|
+| `backend/app/api/periods.py` | Created — period CRUD, finalize-check, finalize, export, snapshot engine |
+| `backend/app/core/bvi_export.py` | Created — BVI XLSX generation (Z1 + G2 sheets, 144 columns) |
+| `backend/app/main.py` | Modified — registered periods router |
+| `backend/tests/test_periods.py` | Created — 16 tests |
+| `frontend/src/app/periods/page.tsx` | Created — period management UI |
+| `frontend/src/app/layout.tsx` | Modified — added Periods nav link |
+| `frontend/src/lib/api.ts` | Modified — period API client types and functions |
+
+### Deferred
+
+- Snapshot-based export (using frozen snapshot data instead of live master data for finalized periods) — currently both draft and finalized exports use live aggregation
+- Period notes editing — field exists in model but no UI to edit
+- Period comparison view — comparing two periods side by side

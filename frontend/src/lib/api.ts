@@ -653,6 +653,92 @@ export async function getValidation(
   return res.json();
 }
 
+// --- Periods ---
+
+export interface Period {
+  id: number;
+  stichtag: string | null;
+  upload_id: number | null;
+  status: string;
+  finalized_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface FinalizeCheck {
+  can_finalize: boolean;
+  blocking_errors: number;
+  unmapped_tenants: number;
+  unmapped_funds: number;
+  property_completeness_pct: number;
+  warnings: string[];
+}
+
+export interface FinalizeResult {
+  status: string;
+  snapshot_counts: Record<string, number>;
+}
+
+export async function listPeriods(): Promise<Period[]> {
+  const res = await fetch(`${API_BASE}/api/periods`);
+  if (!res.ok) throw new Error("Failed to fetch periods");
+  return res.json();
+}
+
+export async function createPeriod(uploadId: number): Promise<Period> {
+  const res = await fetch(`${API_BASE}/api/periods`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ upload_id: uploadId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Create failed" }));
+    throw new Error(err.detail || "Create failed");
+  }
+  return res.json();
+}
+
+export async function getPeriod(id: number): Promise<Period> {
+  const res = await fetch(`${API_BASE}/api/periods/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch period");
+  return res.json();
+}
+
+export async function deletePeriod(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/periods/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Delete failed" }));
+    throw new Error(err.detail || "Delete failed");
+  }
+}
+
+export async function getFinalizeCheck(
+  periodId: number
+): Promise<FinalizeCheck> {
+  const res = await fetch(`${API_BASE}/api/periods/${periodId}/finalize-check`);
+  if (!res.ok) throw new Error("Failed to check finalization");
+  return res.json();
+}
+
+export async function finalizePeriod(
+  periodId: number
+): Promise<FinalizeResult> {
+  const res = await fetch(`${API_BASE}/api/periods/${periodId}/finalize`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Finalize failed" }));
+    throw new Error(err.detail || "Finalize failed");
+  }
+  return res.json();
+}
+
+export function periodExportUrl(periodId: number): string {
+  return `${API_BASE}/api/periods/${periodId}/export`;
+}
+
 // --- Inconsistency API ---
 
 export async function listInconsistencies(params?: {

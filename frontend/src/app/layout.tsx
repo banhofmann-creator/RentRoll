@@ -61,6 +61,12 @@ export default function RootLayout({
                 >
                   Master Data
                 </Link>
+                <Link
+                  href="/periods"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Periods
+                </Link>
               </div>
             </div>
           </div>
