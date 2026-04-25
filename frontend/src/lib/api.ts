@@ -554,6 +554,105 @@ export async function applyExcelImport(
   return res.json();
 }
 
+// --- Transform / Aggregation ---
+
+export interface Z1Row {
+  bvi_fund_id: string | null;
+  stichtag: string | null;
+  currency: string;
+  bvi_tenant_id: string | null;
+  property_id: string | null;
+  tenant_name: string | null;
+  nace_sector: string | null;
+  pd_min: number | null;
+  pd_max: number | null;
+  contractual_rent: number;
+}
+
+export interface G2Row {
+  fund_id: string | null;
+  stichtag: string | null;
+  currency: string;
+  property_id: string | null;
+  label: string | null;
+  use_type_primary: string | null;
+  country: string | null;
+  city: string | null;
+  rentable_area: number;
+  tenant_count: number;
+  floorspace_let: number;
+  contractual_rent: number;
+  rent_per_sqm: number | null;
+  market_rental_value: number;
+  reversion: number | null;
+  parking_total: number;
+  parking_let: number;
+  lease_expiry: Record<string, number>;
+  lease_term_avg: number | null;
+  fair_value: number | null;
+  epc_rating: string | null;
+  [key: string]: unknown;
+}
+
+export interface Z1Preview {
+  rows: Z1Row[];
+  total: number;
+}
+
+export interface G2Preview {
+  rows: G2Row[];
+  total: number;
+}
+
+export interface ValidationIssue {
+  property_id: string;
+  field: string;
+  expected: number;
+  actual: number;
+  deviation_pct: number;
+}
+
+export interface ValidationResult {
+  issues: ValidationIssue[];
+  total: number;
+  properties_checked: number;
+}
+
+export async function getZ1Preview(uploadId: number): Promise<Z1Preview> {
+  const res = await fetch(
+    `${API_BASE}/api/transform/z1/preview?upload_id=${uploadId}`
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed" }));
+    throw new Error(err.detail || "Z1 preview failed");
+  }
+  return res.json();
+}
+
+export async function getG2Preview(uploadId: number): Promise<G2Preview> {
+  const res = await fetch(
+    `${API_BASE}/api/transform/g2/preview?upload_id=${uploadId}`
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed" }));
+    throw new Error(err.detail || "G2 preview failed");
+  }
+  return res.json();
+}
+
+export async function getValidation(
+  uploadId: number
+): Promise<ValidationResult> {
+  const res = await fetch(
+    `${API_BASE}/api/transform/validation?upload_id=${uploadId}`
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Failed" }));
+    throw new Error(err.detail || "Validation failed");
+  }
+  return res.json();
+}
+
 // --- Inconsistency API ---
 
 export async function listInconsistencies(params?: {

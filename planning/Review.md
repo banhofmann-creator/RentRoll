@@ -327,3 +327,96 @@ frontend/package.json                            (modified — ag-grid deps)
 - AG Grid batch PATCH endpoint (per-cell PATCH works for MVP)
 - CRREM tab in property detail form has basic numeric inputs; could use dedicated area editor later
 - Excel roundtrip selective apply (checkbox per change) — currently applies all changes
+
+---
+
+## Phase 4: Transformation & Validation
+
+**Status:** Complete  
+**Date:** 2026-04-25
+
+### What was built
+
+**Z1 Aggregation Engine** (`backend/app/core/aggregation.py`)
+- Groups CSV data rows by (fund, property_id, tenant_name), excluding LEERSTAND
+- Sums annual_net_rent per group to produce one Z1 row per tenant per property
+- Joins fund_mapping for BVI fund IDs, tenant_master + aliases for BVI tenant IDs, NACE sectors, PD values
+- Sorted output by fund → property → tenant
+
+**G2 Aggregation Engine** (`backend/app/core/aggregation.py`)
+- Full 144-column aggregation from raw_rent_roll data per (fund, property_id):
+  - Floor areas by unit type (10 types: Büro, Halle, Empore/Mezzanine, Freifläche, Gastronomie, Einzelhandel, Hotel, Rampe, Wohnen, Sonstige)
+  - Parking totals (let vs total) from Stellplätze rows
+  - Rent by use type (total, let, vacant) — 33 rent columns
+  - ERV by use type (12 columns)
+  - Lease expiry bucketing: year(lease_end) - year(stichtag) → buckets 0-9, 10+, open-ended
+  - Market rental value from summary row × 12
+  - Reversion = (market - contractual) / contractual
+  - Rent per sqm
+  - WAULT from summary row
+  - USE_TYPE_PRIMARY via 75% rule
+  - ESG + technical specs passthrough from property_master
+- LEERSTAND exclusions: not counted in tenant count, floorspace_let, let_rent; included in rentable_area, vacant_rent (using market_rent_monthly × 12)
+
+**USE_TYPE_PRIMARY Derivation** (`derive_use_type()`)
+- If any single type ≥ 75% of total area → that type
+- If no type ≥ 75% but only one type > 25% → largest type
+- If multiple types > 25% → MISCELLANEOUS
+- Empty → OTHER
+
+**Validation Engine** (`validate_aggregation()`)
+- Compares aggregated values vs property summary rows for: rentable_area, annual_net_rent, parking_count, market_rent
+- Flags discrepancies > 1%
+- Returns sorted by deviation (highest first)
+
+**Transform API** (`backend/app/api/transform.py`)
+- `GET /api/transform/z1/preview?upload_id=` — Z1 aggregation preview
+- `GET /api/transform/g2/preview?upload_id=` — G2 aggregation preview
+- `GET /api/transform/validation?upload_id=` — validation check results
+- Upload status validation (must be "complete")
+
+**Frontend Transform Preview** (`frontend/src/app/transform/page.tsx`)
+- Upload selector (filters to complete uploads)
+- Z1 tab: full tenant/lease table with fund, property, tenant, NACE, PD, rent
+- G2 tab: sub-grouped columns (Identity, Areas, Rent, Lease Expiry, Valuation) with toggleable column groups
+- Validation tab: green/red status indicator, issue table with property, field, expected, actual, deviation %
+- German number formatting, alternating row colors, GARBE design system
+
+### Codex review findings (fixed)
+
+| # | Severity | Issue | Fix |
+|---|---|---|---|
+| 1 | P1 | `gross_potential_income` excluded vacant market rent | Changed to `contractual_rent + sum(vacant_rent_*)` |
+| 2 | P2 | Reversion = -100% when no summary row (market_rental_value=0) | Added `market_rental_value` guard, returns `None` when unknown |
+| 3 | P2 | Truthiness checks on numeric fields turned zeros into `None` | Changed to `is not None` checks |
+
+### Test coverage
+
+- 34 new tests in `test_aggregation.py`
+- 171 total backend tests pass
+- Frontend builds clean (9 routes)
+
+Tests cover:
+- USE_TYPE_PRIMARY: dominant, threshold, single above 25%, miscellaneous, empty
+- Z1: basic aggregation, LEERSTAND exclusion, multiple tenants, tenant alias lookup
+- G2: areas, tenant count, rent by type, ERV, let vs vacant, floorspace_let, use_type_primary, lease expiry bucketing (0-9, 10+, open-ended), property_master field passthrough, market rental/reversion, rent_per_sqm, parking let/total
+- Validation: no issues, area mismatch, rent mismatch, within tolerance
+- API endpoints: z1/g2 preview, validation, upload not found, upload not ready
+
+### Files changed
+
+| File | Action |
+|---|---|
+| `backend/app/core/aggregation.py` | Created — Z1/G2 aggregation, USE_TYPE_PRIMARY, validation |
+| `backend/app/api/transform.py` | Created — 3 preview/validation endpoints |
+| `backend/app/main.py` | Modified — registered transform router |
+| `backend/app/models/schemas.py` | Modified — Z1/G2/Validation response schemas |
+| `backend/tests/test_aggregation.py` | Created — 31 tests |
+| `frontend/src/app/transform/page.tsx` | Created — transform preview UI |
+| `frontend/src/app/layout.tsx` | Modified — added Transform nav link |
+| `frontend/src/lib/api.ts` | Modified — transform API client functions |
+
+### Deferred
+
+- G2 column sub-groups in frontend (rent by type, ERV breakdown) — only showing summary columns in preview; full 144-column view deferred to export phase
+- Validation auto-creation of DataInconsistency records — currently returns issues but doesn't persist them; will integrate with inconsistency workflow in Phase 5

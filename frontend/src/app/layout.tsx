@@ -50,6 +50,12 @@ export default function RootLayout({
                   Quality
                 </Link>
                 <Link
+                  href="/transform"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Transform
+                </Link>
+                <Link
                   href="/master-data"
                   className="text-garbe-blau-20 hover:text-white transition-colors"
                 >

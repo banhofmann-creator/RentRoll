@@ -426,3 +426,165 @@ class FuzzyMatch(BaseModel):
     id: int
     name: str
     score: float
+
+
+# --- Transform / Aggregation ---
+
+class Z1RowResponse(BaseModel):
+    bvi_fund_id: str | None
+    stichtag: date | None
+    currency: str
+    bvi_tenant_id: str | None
+    property_id: str | None
+    tenant_name: str | None
+    nace_sector: str | None
+    pd_min: float | None
+    pd_max: float | None
+    contractual_rent: float
+
+
+class G2RowResponse(BaseModel):
+    fund_id: str | None
+    stichtag: date | None
+    currency: str
+    property_id: str | None
+    predecessor_id: str | None
+    label: str | None
+    prop_state: str | None
+    ownership_type: str | None
+    land_ownership: str | None
+    country: str | None
+    region: str | None
+    zip_code: str | None
+    city: str | None
+    street: str | None
+    location_quality: str | None
+    green_building_vendor: str | None
+    green_building_cert: str | None
+    green_building_from: date | None
+    green_building_to: date | None
+    ownership_share: float | None
+    purchase_date: date | None
+    construction_year: int | None
+    use_type_primary: str | None
+    risk_style: str | None
+    fair_value: float | None
+    market_rental_value: float
+    market_net_yield: float | None
+    last_valuation_date: date | None
+    next_valuation_date: date | None
+    area_measure: str
+    plot_size_sqm: float | None
+    rentable_area: float
+    tenant_count: int
+    floorspace_let: float
+    area_office: float
+    area_mezzanine: float
+    area_industrial: float
+    area_outdoor: float
+    area_gastronomy: float
+    area_retail: float
+    area_hotel: float
+    area_ramp: float
+    area_residential: float
+    area_other: float
+    parking_total: int
+    parking_let: int
+    debt_property: float | None
+    shareholder_loan: float | None
+    contractual_rent: float
+    rent_per_sqm: float | None
+    gross_potential_income: float
+    rent_office: float
+    rent_mezzanine: float
+    rent_industrial_outdoor: float
+    rent_industrial: float
+    rent_outdoor: float
+    rent_gastronomy: float
+    rent_retail: float
+    rent_hotel: float
+    rent_ramp: float
+    rent_residential: float
+    rent_parking: float
+    rent_other: float
+    erv_total: float
+    erv_office: float
+    erv_mezzanine: float
+    erv_industrial: float
+    erv_outdoor: float
+    erv_gastronomy: float
+    erv_retail: float
+    erv_hotel: float
+    erv_ramp: float
+    erv_residential: float
+    erv_parking: float
+    erv_other: float
+    let_rent_office: float
+    let_rent_mezzanine: float
+    let_rent_industrial: float
+    let_rent_outdoor: float
+    let_rent_gastronomy: float
+    let_rent_retail: float
+    let_rent_hotel: float
+    let_rent_ramp: float
+    let_rent_residential: float
+    let_rent_parking: float
+    let_rent_other: float
+    vacant_rent_office: float
+    vacant_rent_mezzanine: float
+    vacant_rent_industrial: float
+    vacant_rent_outdoor: float
+    vacant_rent_gastronomy: float
+    vacant_rent_retail: float
+    vacant_rent_hotel: float
+    vacant_rent_ramp: float
+    vacant_rent_residential: float
+    vacant_rent_parking: float
+    vacant_rent_other: float
+    lease_expiry: dict
+    lease_term_avg: float | None
+    tenant_count_2: int
+    co2_emissions: float | None
+    co2_measurement_year: int | None
+    energy_intensity: float | None
+    energy_intensity_normalised: float | None
+    data_quality_energy: str | None
+    energy_reference_area: float | None
+    crrem_floor_areas: dict | None
+    exposure_fossil_fuels: float | None
+    exposure_energy_inefficiency: float | None
+    waste_total: float | None
+    waste_recycled_pct: float | None
+    epc_rating: str | None
+    tech_clear_height: float | None
+    tech_floor_load_capacity: float | None
+    tech_loading_docks: int | None
+    tech_sprinkler: str | None
+    tech_lighting: str | None
+    tech_heating: str | None
+    maintenance: str | None
+    reversion: float | None
+
+
+class Z1PreviewResponse(BaseModel):
+    rows: list[Z1RowResponse]
+    total: int
+
+
+class G2PreviewResponse(BaseModel):
+    rows: list[G2RowResponse]
+    total: int
+
+
+class ValidationIssueResponse(BaseModel):
+    property_id: str
+    field: str
+    expected: float
+    actual: float
+    deviation_pct: float
+
+
+class ValidationResponse(BaseModel):
+    issues: list[ValidationIssueResponse]
+    total: int
+    properties_checked: int
