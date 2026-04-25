@@ -1,23 +1,13 @@
-import os
-
-os.environ.setdefault("TESTING", "1")
-os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
-
 from datetime import date
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.config import settings
 from app.core.aggregation import (
     aggregate_g2,
     aggregate_z1,
     derive_use_type,
     validate_aggregation,
 )
-from app.database import Base, get_db
 from app.models.database import (
     CsvUpload,
     FundMapping,
@@ -26,46 +16,6 @@ from app.models.database import (
     TenantMaster,
     TenantNameAlias,
 )
-
-test_engine = create_engine(
-    settings.effective_database_url,
-    connect_args={"check_same_thread": False},
-)
-TestSession = sessionmaker(bind=test_engine)
-
-
-def override_get_db():
-    db = TestSession()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@pytest.fixture(autouse=True)
-def setup_db():
-    Base.metadata.create_all(test_engine)
-    from app.api.upload import set_session_factory
-    set_session_factory(TestSession)
-    yield
-    set_session_factory(None)
-    Base.metadata.drop_all(test_engine)
-
-
-@pytest.fixture
-def client():
-    from app.main import app
-    app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture
-def db():
-    session = TestSession()
-    yield session
-    session.close()
 
 
 def _make_upload(db, stichtag=None):

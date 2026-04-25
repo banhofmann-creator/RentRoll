@@ -1,112 +1,92 @@
-import os
-
-os.environ.setdefault("TESTING", "1")
-os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.config import settings
-from app.database import Base
 from app.models.database import (
     CsvUpload,
     DataInconsistency,
     FundMapping,
     PropertyMaster,
     RawRentRoll,
-    TenantNameAlias,
     TenantMaster,
+    TenantNameAlias,
 )
 from app.core.inconsistency_detector import detect_inconsistencies
 from app.parsers.garbe_mieterliste import GarbeMieterliste
 
-test_engine = create_engine(
-    settings.effective_database_url,
-    connect_args={"check_same_thread": False},
-)
-TestSession = sessionmaker(bind=test_engine)
+_cached_parse_result = None
 
 
-@pytest.fixture(autouse=True)
-def setup_db():
-    Base.metadata.create_all(test_engine)
-    yield
-    Base.metadata.drop_all(test_engine)
+def _get_parsed_rows(sample_csv_bytes):
+    global _cached_parse_result
+    if _cached_parse_result is None:
+        parser = GarbeMieterliste()
+        result = parser.parse(sample_csv_bytes)
+        rows = []
+        for row_dict in result.rows:
+            rows.append({
+                "row_type": row_dict.pop("row_type"),
+                "row_number": row_dict.pop("row_number"),
+                "fund_inherited": row_dict.pop("fund_inherited", False),
+                **row_dict,
+            })
+        _cached_parse_result = rows
+    return _cached_parse_result
 
 
-@pytest.fixture
-def db():
-    session = TestSession()
-    yield session
-    session.close()
-
-
-@pytest.fixture
-def parsed_upload(db, sample_csv_bytes):
+def _insert_parsed_upload(db, sample_csv_bytes):
     upload = CsvUpload(filename="test.csv", status="complete")
     db.add(upload)
     db.commit()
     db.refresh(upload)
 
-    parser = GarbeMieterliste()
-    result = parser.parse(sample_csv_bytes)
-
-    rows = []
-    for row_dict in result.rows:
-        row_type = row_dict.pop("row_type")
-        row_number = row_dict.pop("row_number")
-        fund_inherited = row_dict.pop("fund_inherited", False)
-        rows.append(RawRentRoll(
+    cached = _get_parsed_rows(sample_csv_bytes)
+    db_rows = []
+    for row in cached:
+        row_copy = dict(row)
+        db_rows.append(RawRentRoll(
             upload_id=upload.id,
-            row_number=row_number,
-            row_type=row_type,
-            fund_inherited=fund_inherited,
-            **row_dict,
+            row_number=row_copy.pop("row_number"),
+            row_type=row_copy.pop("row_type"),
+            fund_inherited=row_copy.pop("fund_inherited"),
+            **row_copy,
         ))
-
-    db.bulk_save_objects(rows)
+    db.bulk_save_objects(db_rows)
     db.commit()
     return upload.id
 
 
-def test_no_false_positive_aggregation_on_real_data(db, parsed_upload):
-    results = detect_inconsistencies(db, parsed_upload)
-    agg_mismatches = [r for r in results if r.category == "aggregation_mismatch"]
-    assert len(agg_mismatches) == 0, (
-        f"Expected no aggregation mismatches on clean sample data, "
-        f"got {len(agg_mismatches)}: {[r.description for r in agg_mismatches]}"
+@pytest.fixture
+def parsed_upload(db, sample_csv_bytes):
+    return _insert_parsed_upload(db, sample_csv_bytes)
+
+
+def test_detection_on_real_data(db, sample_csv_bytes):
+    """Verify all detection categories on real CSV data in a single pass."""
+    upload_id = _insert_parsed_upload(db, sample_csv_bytes)
+    results = detect_inconsistencies(db, upload_id)
+
+    # No false-positive aggregation mismatches
+    agg = [r for r in results if r.category == "aggregation_mismatch"]
+    assert len(agg) == 0, (
+        f"Expected no aggregation mismatches, got {len(agg)}: "
+        f"{[r.description for r in agg]}"
     )
 
-
-def test_unmapped_tenants_detected(db, parsed_upload):
-    results = detect_inconsistencies(db, parsed_upload)
-    unmapped = [r for r in results if r.category == "unmapped_tenant"]
-    assert len(unmapped) > 0
-    for item in unmapped:
+    # Unmapped tenants detected (LEERSTAND excluded)
+    unmapped_tenants = [r for r in results if r.category == "unmapped_tenant"]
+    assert len(unmapped_tenants) > 0
+    for item in unmapped_tenants:
         assert item.severity == "error"
         assert item.entity_type == "tenant"
         assert item.entity_id != "LEERSTAND"
 
-
-def test_leerstand_excluded_from_unmapped(db, parsed_upload):
-    results = detect_inconsistencies(db, parsed_upload)
-    unmapped = [r for r in results if r.category == "unmapped_tenant"]
-    entity_ids = [r.entity_id for r in unmapped]
-    assert "LEERSTAND" not in entity_ids
-
-
-def test_unmapped_funds_detected(db, parsed_upload):
-    results = detect_inconsistencies(db, parsed_upload)
-    unmapped = [r for r in results if r.category == "unmapped_fund"]
-    assert len(unmapped) > 0
-    for item in unmapped:
+    # Unmapped funds detected
+    unmapped_funds = [r for r in results if r.category == "unmapped_fund"]
+    assert len(unmapped_funds) > 0
+    for item in unmapped_funds:
         assert item.severity == "error"
         assert item.entity_type == "fund"
 
-
-def test_missing_metadata_detected(db, parsed_upload):
-    results = detect_inconsistencies(db, parsed_upload)
+    # Missing metadata detected
     missing = [r for r in results if r.category == "missing_metadata"]
     assert len(missing) > 0
     for item in missing:

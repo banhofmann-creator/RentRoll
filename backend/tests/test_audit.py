@@ -1,39 +1,8 @@
-import os
-
-os.environ.setdefault("TESTING", "1")
-os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
-
 from datetime import date
 from decimal import Decimal
 
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from app.config import settings
-from app.database import Base
 from app.models.database import MasterDataAudit
 from app.core.audit import log_changes, log_creation, log_deletion, snapshot
-
-test_engine = create_engine(
-    settings.effective_database_url,
-    connect_args={"check_same_thread": False},
-)
-TestSession = sessionmaker(bind=test_engine)
-
-
-@pytest.fixture(autouse=True)
-def setup_db():
-    Base.metadata.create_all(test_engine)
-    yield
-    Base.metadata.drop_all(test_engine)
-
-
-@pytest.fixture
-def db():
-    session = TestSession()
-    yield session
-    session.close()
 
 
 def test_log_changes_detects_diffs(db):

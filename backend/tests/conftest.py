@@ -9,10 +9,72 @@ from pathlib import Path
 
 import openpyxl
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+
+from app.config import settings
+from app.database import Base, get_db
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "samples"
 SAMPLE_CSV = SAMPLES_DIR / "Mieterliste_1-Garbe (2).csv"
 SAMPLE_BVI = SAMPLES_DIR / "BVI Target Tables.xlsx"
+
+test_engine = create_engine(
+    settings.effective_database_url,
+    connect_args={"check_same_thread": False},
+)
+TestSession = sessionmaker(bind=test_engine)
+
+_tables_created = False
+
+
+def _ensure_tables():
+    global _tables_created
+    if not _tables_created:
+        Base.metadata.create_all(test_engine)
+        _tables_created = True
+
+
+def override_get_db():
+    db = TestSession()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    _ensure_tables()
+
+    from app.api.upload import set_session_factory
+    set_session_factory(TestSession)
+
+    yield
+
+    set_session_factory(None)
+
+    # Truncate all tables instead of drop/recreate
+    with test_engine.begin() as conn:
+        for table in reversed(Base.metadata.sorted_tables):
+            conn.execute(table.delete())
+
+
+@pytest.fixture
+def client():
+    from app.main import app
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def db():
+    session = TestSession()
+    yield session
+    session.close()
 
 
 @pytest.fixture
@@ -30,7 +92,6 @@ def make_test_bvi_xlsx(rows: list[dict]) -> bytes:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "G2_Property_data"
-    # Header rows 1-11 (minimal)
     ws.cell(1, 1, "")
     ws.cell(2, 2, "Range 2: Property data")
     ws.cell(11, 2, "Fund ID")
@@ -71,8 +132,8 @@ def make_test_bvi_xlsx(rows: list[dict]) -> bytes:
 
     for i, row in enumerate(rows):
         row_idx = 12 + i
-        ws.cell(row_idx, 3, datetime(2025, 3, 31))  # period
-        ws.cell(row_idx, 4, "EUR")  # currency
+        ws.cell(row_idx, 3, datetime(2025, 3, 31))
+        ws.cell(row_idx, 4, "EUR")
         for field, col in col_map.items():
             if field in row:
                 ws.cell(row_idx, col, row[field])
