@@ -119,13 +119,50 @@ export interface PropertyMaster {
   id: number;
   property_id: string;
   fund_csv_name: string | null;
-  city: string | null;
-  street: string | null;
-  zip_code: string | null;
+  predecessor_id: string | null;
+  prop_state: string | null;
+  ownership_type: string | null;
+  land_ownership: string | null;
   country: string | null;
   region: string | null;
+  zip_code: string | null;
+  city: string | null;
+  street: string | null;
+  location_quality: string | null;
+  green_building_vendor: string | null;
+  green_building_cert: string | null;
+  green_building_from: string | null;
+  green_building_to: string | null;
+  ownership_share: number | null;
+  purchase_date: string | null;
+  construction_year: number | null;
+  risk_style: string | null;
   fair_value: number | null;
-  [key: string]: unknown;
+  market_net_yield: number | null;
+  last_valuation_date: string | null;
+  next_valuation_date: string | null;
+  plot_size_sqm: number | null;
+  debt_property: number | null;
+  shareholder_loan: number | null;
+  co2_emissions: number | null;
+  co2_measurement_year: number | null;
+  energy_intensity: number | null;
+  energy_intensity_normalised: number | null;
+  data_quality_energy: string | null;
+  energy_reference_area: number | null;
+  crrem_floor_areas_json: Record<string, number> | null;
+  exposure_fossil_fuels: number | null;
+  exposure_energy_inefficiency: number | null;
+  waste_total: number | null;
+  waste_recycled_pct: number | null;
+  epc_rating: string | null;
+  tech_clear_height: number | null;
+  tech_floor_load_capacity: number | null;
+  tech_loading_docks: number | null;
+  tech_sprinkler: string | null;
+  tech_lighting: string | null;
+  tech_heating: string | null;
+  maintenance: string | null;
 }
 
 export interface UnmappedItem {
@@ -296,6 +333,12 @@ export async function listProperties(params?: {
   return res.json();
 }
 
+export async function getProperty(id: number): Promise<PropertyMaster> {
+  const res = await fetch(`${API_BASE}/api/master-data/properties/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch property");
+  return res.json();
+}
+
 export async function createProperty(body: {
   property_id: string;
   fund_csv_name?: string;
@@ -344,6 +387,170 @@ export async function listUnmapped(
   const sp = entityType ? `?entity_type=${entityType}` : "";
   const res = await fetch(`${API_BASE}/api/master-data/unmapped${sp}`);
   if (!res.ok) throw new Error("Failed to fetch unmapped items");
+  return res.json();
+}
+
+// --- Completeness ---
+
+export interface FieldStat {
+  filled: number;
+  total: number;
+  fill_rate: number;
+}
+
+export interface FieldGroupStats {
+  fields: Record<string, FieldStat>;
+}
+
+export interface CompletenessResponse {
+  property_groups: Record<string, FieldGroupStats>;
+  tenant_fields: Record<string, FieldStat>;
+}
+
+export async function getCompleteness(): Promise<CompletenessResponse> {
+  const res = await fetch(`${API_BASE}/api/master-data/completeness`);
+  if (!res.ok) throw new Error("Failed to fetch completeness");
+  return res.json();
+}
+
+// --- Fuzzy Match ---
+
+export interface FuzzyMatch {
+  id: number;
+  name: string;
+  score: number;
+}
+
+export async function suggestTenants(
+  q: string,
+  limit = 5
+): Promise<FuzzyMatch[]> {
+  const sp = new URLSearchParams({ q, limit: String(limit) });
+  const res = await fetch(
+    `${API_BASE}/api/master-data/tenants/suggest?${sp.toString()}`
+  );
+  if (!res.ok) throw new Error("Failed to suggest tenants");
+  return res.json();
+}
+
+export async function suggestFunds(
+  q: string,
+  limit = 5
+): Promise<FuzzyMatch[]> {
+  const sp = new URLSearchParams({ q, limit: String(limit) });
+  const res = await fetch(
+    `${API_BASE}/api/master-data/funds/suggest?${sp.toString()}`
+  );
+  if (!res.ok) throw new Error("Failed to suggest funds");
+  return res.json();
+}
+
+// --- BVI Import ---
+
+export interface BviImportPreview {
+  properties_found: number;
+  new_properties: string[];
+  existing_properties: string[];
+  field_coverage: Record<string, number>;
+  bvi_fund_ids: string[];
+  warnings: string[];
+}
+
+export interface BviImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  warnings: string[];
+}
+
+export async function previewBviImport(
+  file: File
+): Promise<BviImportPreview> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/api/bvi-import/preview`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Preview failed" }));
+    throw new Error(err.detail || "Preview failed");
+  }
+  return res.json();
+}
+
+export async function executeBviImport(
+  file: File,
+  mode: "fill_gaps" | "overwrite" = "fill_gaps"
+): Promise<BviImportResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(
+    `${API_BASE}/api/bvi-import/execute?mode=${mode}`,
+    { method: "POST", body: formData }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Import failed" }));
+    throw new Error(err.detail || "Import failed");
+  }
+  return res.json();
+}
+
+// --- Excel Roundtrip ---
+
+export interface ExcelDiff {
+  property_id: string;
+  field: string;
+  current_value: string | null;
+  new_value: string;
+  change_type: "add" | "update";
+}
+
+export interface ExcelPreview {
+  diffs: ExcelDiff[];
+  total_rows: number;
+}
+
+export interface ExcelApplyResult {
+  created: number;
+  updated: number;
+  skipped: number;
+}
+
+export function exportPropertiesUrl(): string {
+  return `${API_BASE}/api/master-data/properties/export`;
+}
+
+export async function previewExcelImport(
+  file: File
+): Promise<ExcelPreview> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(
+    `${API_BASE}/api/master-data/properties/import/preview`,
+    { method: "POST", body: formData }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Preview failed" }));
+    throw new Error(err.detail || "Preview failed");
+  }
+  return res.json();
+}
+
+export async function applyExcelImport(
+  file: File,
+  mode: "fill_gaps" | "overwrite" = "fill_gaps"
+): Promise<ExcelApplyResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(
+    `${API_BASE}/api/master-data/properties/import/apply?mode=${mode}`,
+    { method: "POST", body: formData }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Apply failed" }));
+    throw new Error(err.detail || "Apply failed");
+  }
   return res.json();
 }
 

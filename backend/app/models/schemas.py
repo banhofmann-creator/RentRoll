@@ -383,3 +383,46 @@ class UnmappedItem(BaseModel):
     entity_id: str
     upload_count: int
     inconsistency_ids: list[int]
+
+
+# --- BVI Import ---
+
+class BviImportPreview(BaseModel):
+    properties_found: int
+    new_properties: list[str]
+    existing_properties: list[str]
+    field_coverage: dict[str, int]
+    bvi_fund_ids: list[str]
+    warnings: list[str]
+
+
+class BviImportResult(BaseModel):
+    created: int
+    updated: int
+    skipped: int
+    warnings: list[str]
+
+
+# --- Completeness ---
+
+class FieldStat(BaseModel):
+    filled: int
+    total: int
+    fill_rate: float
+
+
+class FieldGroupStats(BaseModel):
+    fields: dict[str, FieldStat]
+
+
+class CompletenessResponse(BaseModel):
+    property_groups: dict[str, FieldGroupStats]
+    tenant_fields: dict[str, FieldStat]
+
+
+# --- Fuzzy Match ---
+
+class FuzzyMatch(BaseModel):
+    id: int
+    name: str
+    score: float

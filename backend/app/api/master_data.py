@@ -1,7 +1,8 @@
 from collections import defaultdict
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -16,9 +17,13 @@ from app.models.database import (
     TenantNameAlias,
 )
 from app.models.schemas import (
+    CompletenessResponse,
+    FieldGroupStats,
+    FieldStat,
     FundMappingCreate,
     FundMappingResponse,
     FundMappingUpdate,
+    FuzzyMatch,
     PropertyMasterCreate,
     PropertyMasterResponse,
     PropertyMasterUpdate,
@@ -85,6 +90,23 @@ def list_funds(
     if search:
         query = query.filter(FundMapping.csv_fund_name.ilike(f"%{search}%"))
     return query.order_by(FundMapping.csv_fund_name).offset(offset).limit(limit).all()
+
+
+@router.get("/master-data/funds/suggest", response_model=list[FuzzyMatch])
+def suggest_funds(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    funds = db.query(FundMapping).all()
+    q_lower = q.lower()
+    matches = []
+    for f in funds:
+        score = SequenceMatcher(None, q_lower, f.csv_fund_name.lower()).ratio()
+        if score >= 0.4:
+            matches.append(FuzzyMatch(id=f.id, name=f.csv_fund_name, score=round(score, 4)))
+    matches.sort(key=lambda m: m.score, reverse=True)
+    return matches[:limit]
 
 
 @router.post("/master-data/funds", response_model=FundMappingResponse)
@@ -157,6 +179,23 @@ def list_tenants(
         .limit(limit)
         .all()
     )
+
+
+@router.get("/master-data/tenants/suggest", response_model=list[FuzzyMatch])
+def suggest_tenants(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    tenants = db.query(TenantMaster).all()
+    q_lower = q.lower()
+    matches = []
+    for t in tenants:
+        score = SequenceMatcher(None, q_lower, t.tenant_name_canonical.lower()).ratio()
+        if score >= 0.4:
+            matches.append(FuzzyMatch(id=t.id, name=t.tenant_name_canonical, score=round(score, 4)))
+    matches.sort(key=lambda m: m.score, reverse=True)
+    return matches[:limit]
 
 
 @router.post("/master-data/tenants", response_model=TenantMasterResponse)
@@ -356,6 +395,72 @@ def delete_property(property_id: int, db: Session = Depends(get_db)):
     db.delete(prop)
     db.commit()
     return {"message": "Property deleted"}
+
+
+# ── Completeness ────────────────────────────────────────────────────
+
+PROPERTY_FIELD_GROUPS = {
+    "core_location": [
+        "country", "region", "zip_code", "city", "street",
+        "location_quality", "predecessor_id", "prop_state",
+        "ownership_type", "land_ownership",
+    ],
+    "green_building": [
+        "green_building_vendor", "green_building_cert",
+        "green_building_from", "green_building_to",
+    ],
+    "financial_valuation": [
+        "ownership_share", "purchase_date", "construction_year",
+        "risk_style", "fair_value", "market_net_yield",
+        "last_valuation_date", "next_valuation_date",
+        "plot_size_sqm", "debt_property", "shareholder_loan",
+    ],
+    "esg_sustainability": [
+        "co2_emissions", "co2_measurement_year", "energy_intensity",
+        "energy_intensity_normalised", "data_quality_energy",
+        "energy_reference_area", "crrem_floor_areas_json",
+        "exposure_fossil_fuels", "exposure_energy_inefficiency",
+        "waste_total", "waste_recycled_pct", "epc_rating",
+    ],
+    "technical_specs": [
+        "tech_clear_height", "tech_floor_load_capacity",
+        "tech_loading_docks", "tech_sprinkler", "tech_lighting",
+        "tech_heating", "maintenance",
+    ],
+}
+
+
+@router.get("/master-data/completeness", response_model=CompletenessResponse)
+def get_completeness(db: Session = Depends(get_db)):
+    properties = db.query(PropertyMaster).all()
+    total = len(properties)
+
+    property_groups: dict[str, FieldGroupStats] = {}
+    for group_name, fields in PROPERTY_FIELD_GROUPS.items():
+        field_stats: dict[str, FieldStat] = {}
+        for field in fields:
+            filled = sum(1 for p in properties if getattr(p, field, None) is not None)
+            field_stats[field] = FieldStat(
+                filled=filled, total=total,
+                fill_rate=round(filled / total, 4) if total else 0.0,
+            )
+        property_groups[group_name] = FieldGroupStats(fields=field_stats)
+
+    tenants = db.query(TenantMaster).all()
+    tenant_total = len(tenants)
+    tenant_field_names = ["bvi_tenant_id", "nace_sector", "pd_min", "pd_max", "notes"]
+    tenant_fields: dict[str, FieldStat] = {}
+    for field in tenant_field_names:
+        filled = sum(1 for t in tenants if getattr(t, field, None) is not None)
+        tenant_fields[field] = FieldStat(
+            filled=filled, total=tenant_total,
+            fill_rate=round(filled / tenant_total, 4) if tenant_total else 0.0,
+        )
+
+    return CompletenessResponse(
+        property_groups=property_groups,
+        tenant_fields=tenant_fields,
+    )
 
 
 # ── Unmapped Items ───────────────────────────────────────────────────

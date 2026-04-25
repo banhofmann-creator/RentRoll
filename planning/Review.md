@@ -239,3 +239,91 @@ planning/reviews/codex-review-20260424-phase3a.md (new — Codex review report)
 - Completeness dashboard
 - Fuzzy tenant/fund matching suggestions
 - Single-property detail form (full 40-field editing)
+
+---
+
+## Phase 3B: BVI Import, Completeness, Fuzzy Matching, Detail Form, AG Grid, Excel Roundtrip
+
+**Status:** Complete  
+**Date:** 2026-04-25
+
+### What was built
+
+**Step 1 — BVI G2 Importer (Backend)**
+
+- **Parser** (`backend/app/parsers/bvi_g2_importer.py`): Reads `G2_Property_data` sheet from BVI XLSX via openpyxl. `COL_MAP` maps ~40 column indices (1-indexed) to PropertyMaster field names. `CRREM_COLS` maps cols 120-130 to CRREM sub-field keys assembled into a JSON dict. `_coerce_value()` handles datetime→date, int/float coercion, string cleanup. `parse_bvi_g2(file_bytes)` returns `(properties, warnings)`, deduplicating by property_id (merges non-null values across period rows). BVI fund ID from col 2 stored as `_bvi_fund_id` metadata.
+- **API** (`backend/app/api/bvi_import.py`): `POST /api/bvi-import/preview` returns properties_found, new/existing counts, field_coverage, bvi_fund_ids, warnings. `POST /api/bvi-import/execute?mode=fill_gaps|overwrite` upserts properties with audit logging, auto-resolves `missing_metadata` inconsistencies.
+- **Test helper** (`backend/tests/conftest.py`): `make_test_bvi_xlsx(rows)` generates minimal G2 XLSX for tests.
+
+**Step 2 — Completeness + Fuzzy Matching (Backend)**
+
+- **Completeness endpoint** (`GET /api/master-data/completeness`): Returns fill rates per field group (`core_location`, `green_building`, `financial_valuation`, `esg_sustainability`, `technical_specs`) and per tenant field. `PROPERTY_FIELD_GROUPS` constant defines grouping.
+- **Fuzzy matching endpoints**: `GET /api/master-data/tenants/suggest?q=<name>&limit=5` and `GET /api/master-data/funds/suggest?q=<name>&limit=5` using `difflib.SequenceMatcher` (threshold 0.4). Registered before `{id}` routes to avoid path conflict.
+- **New schemas** (`backend/app/models/schemas.py`): `FieldStat`, `FieldGroupStats`, `CompletenessResponse`, `FuzzyMatch`.
+
+**Step 3 — Frontend: Completeness + BVI Import + Fuzzy Match UI**
+
+- **CompletenessDashboard**: Collapsible panel above tabs, per field group: horizontal bar with fill rate %, colored garbe-grun (>80%), garbe-ocker (40-80%), garbe-rot (<40%). Tenant fields shown separately.
+- **BVI Import modal**: "Import BVI" button in header. Modal with file input → preview summary (properties/new/existing counts, fund IDs) → mode radio (fill_gaps/overwrite) → execute → result summary.
+- **Fuzzy match in TenantsTab**: When creating a tenant, debounced `suggestTenants()` call shows "Similar existing tenants" badges with match percentage above the create form.
+- **API client** (`frontend/src/lib/api.ts`): Added `getCompleteness()`, `suggestTenants()`, `suggestFunds()`, `previewBviImport()`, `executeBviImport()`. Expanded `PropertyMaster` interface to all 44 fields.
+
+**Step 4 — Single-Property Detail Form**
+
+- **Detail page** (`frontend/src/app/master-data/properties/[id]/page.tsx`): Fetches property via `GET /api/master-data/properties/{id}`. Horizontal tab bar for 5 field groups (Core/Location, Green Building, Financial, ESG with CRREM sub-editor, Technical). 2-column grid layout. Dirty tracking: only PATCH changed fields. Sticky Save/Cancel bar. Breadcrumb navigation.
+- **Property links**: Property ID in table is now a `<Link>` to `/master-data/properties/{id}`.
+- **API**: Added `getProperty(id)` function.
+
+**Step 5 — AG Grid for Multi-Property Editing**
+
+- **Dependencies**: `ag-grid-community@35.2.1`, `ag-grid-react@35.2.1`.
+- **Grid page** (`frontend/src/app/master-data/properties/grid/page.tsx`): AG Grid with Quartz theme, column groups matching field groups, property_id + city pinned left, editable cells with immediate `PATCH` per cell. Breadcrumb navigation.
+- **Grid Editor link**: Added to PropertiesTab toolbar.
+
+**Step 6 — Excel Roundtrip**
+
+- **Backend** (`backend/app/api/excel_roundtrip.py`): `GET /api/master-data/properties/export` generates XLSX with grouped headers (row 1: group names, row 2: field names, row 3+: data). `POST /api/master-data/properties/import/preview` parses XLSX and returns diff list `[{property_id, field, current_value, new_value, change_type}]`. `POST /api/master-data/properties/import/apply?mode=fill_gaps|overwrite` applies changes with audit trail.
+- **Frontend**: "Download XLSX" link and "Upload & Diff" button on PropertiesTab. Diff preview modal with color-coded table (green=add, yellow=update), mode selection, result summary.
+
+### Codex review findings (fixed)
+
+| Finding | Severity | Fix |
+|---|---|---|
+| XLSX roundtrip false diffs for date/numeric fields (openpyxl datetime vs ORM date/Decimal) | P1 | Added `_normalize()` for type-aware comparison in both preview and apply |
+| CRREM keys in property detail form don't match BVI parser keys | P1 | Updated frontend CRREM_KEYS to match parser output (`retail_high_street`, `industrial_warehouse`, etc.) |
+| BVI import update path doesn't resolve missing_metadata inconsistencies | P2 | Added `_resolve_missing_metadata` to update branch + new test |
+| Excel import creation path has no audit trail or auto-resolve | P2 | Added `log_creation`, `snapshot`, `_resolve_missing_metadata` to creation path |
+
+### Test coverage
+
+**137 tests passing** (111 existing + 26 new):
+
+- `test_bvi_import.py` (10 tests): Preview, preview with existing, fill_gaps creates new, fill_gaps preserves existing, overwrite replaces, empty rows skipped, deduplication, audit entries, resolves missing metadata, invalid mode rejected.
+- `test_master_data_api.py` (40 tests, +8 new): completeness empty/with data/tenant fields, suggest tenants exact/partial/no match, suggest funds partial/no match.
+- `test_excel_roundtrip.py` (7 tests): Export valid XLSX, roundtrip no changes, roundtrip with changes, apply fill_gaps, apply overwrite, apply creates new, apply audit entries.
+
+### Files changed
+
+```
+backend/app/parsers/bvi_g2_importer.py           (new)
+backend/app/api/bvi_import.py                    (new)
+backend/app/api/excel_roundtrip.py               (new)
+backend/tests/test_bvi_import.py                 (new)
+backend/tests/test_excel_roundtrip.py            (new)
+frontend/src/app/master-data/properties/[id]/page.tsx  (new)
+frontend/src/app/master-data/properties/grid/page.tsx  (new)
+backend/app/main.py                              (modified — 2 new routers)
+backend/app/api/master_data.py                   (modified — completeness + fuzzy endpoints)
+backend/app/models/schemas.py                    (modified — 4 new schemas)
+backend/tests/test_master_data_api.py            (modified — 8 new tests)
+backend/tests/conftest.py                        (modified — BVI XLSX fixture)
+frontend/src/lib/api.ts                          (modified — 12 new functions/interfaces)
+frontend/src/app/master-data/page.tsx            (modified — dashboard, import, fuzzy, links)
+frontend/package.json                            (modified — ag-grid deps)
+```
+
+### Deferred
+
+- AG Grid batch PATCH endpoint (per-cell PATCH works for MVP)
+- CRREM tab in property detail form has basic numeric inputs; could use dedicated area editor later
+- Excel roundtrip selective apply (checkbox per change) — currently applies all changes

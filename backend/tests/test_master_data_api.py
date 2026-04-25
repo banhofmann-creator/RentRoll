@@ -523,3 +523,106 @@ def test_update_creates_audit_entries(client, db):
     audit = change_audits[0]
     assert audit.old_value == "F01"
     assert audit.new_value == "F99"
+
+
+# ── Completeness Tests ──────────────────────────────────────────────
+
+def test_completeness_empty(client):
+    resp = client.get("/api/master-data/completeness")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "core_location" in data["property_groups"]
+    assert "financial_valuation" in data["property_groups"]
+    for group in data["property_groups"].values():
+        for stat in group["fields"].values():
+            assert stat["total"] == 0
+            assert stat["fill_rate"] == 0.0
+
+
+def test_completeness_with_data(client, db):
+    db.add_all([
+        PropertyMaster(property_id="1001", city="Essen", country="DE", fair_value=1000000),
+        PropertyMaster(property_id="1002", city="Berlin"),
+        PropertyMaster(property_id="1003"),
+    ])
+    db.commit()
+
+    resp = client.get("/api/master-data/completeness")
+    data = resp.json()
+    core = data["property_groups"]["core_location"]["fields"]
+    assert core["city"]["filled"] == 2
+    assert core["city"]["total"] == 3
+    assert core["country"]["filled"] == 1
+
+    fin = data["property_groups"]["financial_valuation"]["fields"]
+    assert fin["fair_value"]["filled"] == 1
+    assert fin["fair_value"]["total"] == 3
+
+
+def test_completeness_tenant_fields(client, db):
+    db.add_all([
+        TenantMaster(tenant_name_canonical="A", bvi_tenant_id="BVI-1", nace_sector="MANU"),
+        TenantMaster(tenant_name_canonical="B"),
+    ])
+    db.commit()
+
+    resp = client.get("/api/master-data/completeness")
+    data = resp.json()
+    assert data["tenant_fields"]["bvi_tenant_id"]["filled"] == 1
+    assert data["tenant_fields"]["bvi_tenant_id"]["total"] == 2
+    assert data["tenant_fields"]["nace_sector"]["filled"] == 1
+
+
+# ── Fuzzy Matching Tests ────────────────────────────────────────────
+
+def test_suggest_tenants_exact(client):
+    client.post("/api/master-data/tenants", json={"tenant_name_canonical": "Acme Corporation"})
+    client.post("/api/master-data/tenants", json={"tenant_name_canonical": "Beta Industries"})
+
+    resp = client.get("/api/master-data/tenants/suggest?q=Acme Corporation")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    assert data[0]["name"] == "Acme Corporation"
+    assert data[0]["score"] == 1.0
+
+
+def test_suggest_tenants_partial(client):
+    client.post("/api/master-data/tenants", json={"tenant_name_canonical": "Acme Corporation"})
+    client.post("/api/master-data/tenants", json={"tenant_name_canonical": "Acme GmbH"})
+    client.post("/api/master-data/tenants", json={"tenant_name_canonical": "Zzz Unrelated"})
+
+    resp = client.get("/api/master-data/tenants/suggest?q=Acme Corp")
+    data = resp.json()
+    names = [m["name"] for m in data]
+    assert "Acme Corporation" in names
+    assert "Acme GmbH" in names
+
+
+def test_suggest_tenants_no_match(client):
+    client.post("/api/master-data/tenants", json={"tenant_name_canonical": "Alpha"})
+
+    resp = client.get("/api/master-data/tenants/suggest?q=Zzzzzzzzzzzzz")
+    data = resp.json()
+    assert len(data) == 0
+
+
+def test_suggest_funds_partial(client):
+    client.post("/api/master-data/funds", json={"csv_fund_name": "GLIF"})
+    client.post("/api/master-data/funds", json={"csv_fund_name": "GLIFPLUSII"})
+    client.post("/api/master-data/funds", json={"csv_fund_name": "OTHER"})
+
+    resp = client.get("/api/master-data/funds/suggest?q=GLIF")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    names = [m["name"] for m in data]
+    assert "GLIF" in names
+
+
+def test_suggest_funds_no_match(client):
+    client.post("/api/master-data/funds", json={"csv_fund_name": "GLIF"})
+
+    resp = client.get("/api/master-data/funds/suggest?q=ZZZZZZZZZ")
+    data = resp.json()
+    assert len(data) == 0

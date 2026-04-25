@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.bvi_import import router as bvi_import_router
+from app.api.excel_roundtrip import router as excel_roundtrip_router
 from app.api.inconsistencies import router as inconsistency_router
 from app.api.master_data import router as master_data_router
 from app.api.upload import router as upload_router
@@ -34,7 +36,9 @@ app.add_middleware(
 
 app.include_router(upload_router, prefix="/api")
 app.include_router(inconsistency_router, prefix="/api")
+app.include_router(excel_roundtrip_router, prefix="/api")
 app.include_router(master_data_router, prefix="/api")
+app.include_router(bvi_import_router, prefix="/api")
 
 
 @app.get("/api/health")

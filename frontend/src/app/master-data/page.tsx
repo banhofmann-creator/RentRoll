@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type FundMapping,
   type TenantMaster,
   type PropertyMaster,
   type UnmappedItem,
+  type CompletenessResponse,
+  type FuzzyMatch,
+  type BviImportPreview,
+  type BviImportResult,
   listFundMappings,
   createFundMapping,
   updateFundMapping,
@@ -21,16 +26,50 @@ import {
   updateProperty,
   deleteProperty,
   listUnmapped,
+  getCompleteness,
+  suggestTenants,
+  suggestFunds,
+  previewBviImport,
+  executeBviImport,
+  type ExcelDiff,
+  type ExcelApplyResult,
+  exportPropertiesUrl,
+  previewExcelImport,
+  applyExcelImport,
 } from "@/lib/api";
 
 type Tab = "funds" | "tenants" | "properties";
 
 export default function MasterDataPage() {
   const [activeTab, setActiveTab] = useState<Tab>("funds");
+  const [showCompleteness, setShowCompleteness] = useState(false);
+  const [showBviImport, setShowBviImport] = useState(false);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
-      <h1 className="text-2xl font-semibold mb-6">Master Data</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-semibold">Master Data</h1>
+        <div className="flex gap-2">
+          <button
+            className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${
+              showCompleteness
+                ? "bg-garbe-blau text-white"
+                : "border border-garbe-blau text-garbe-blau hover:bg-garbe-blau hover:text-white"
+            }`}
+            onClick={() => setShowCompleteness(!showCompleteness)}
+          >
+            Completeness
+          </button>
+          <button
+            className="px-3 py-1.5 text-sm font-semibold rounded-lg border border-garbe-grun text-garbe-grun hover:bg-garbe-grun hover:text-white transition-colors"
+            onClick={() => setShowBviImport(true)}
+          >
+            Import BVI
+          </button>
+        </div>
+      </div>
+
+      {showCompleteness && <CompletenessDashboard />}
 
       <div className="flex gap-1 mb-6">
         {(["funds", "tenants", "properties"] as Tab[]).map((tab) => (
@@ -55,7 +94,280 @@ export default function MasterDataPage() {
       {activeTab === "funds" && <FundsTab />}
       {activeTab === "tenants" && <TenantsTab />}
       {activeTab === "properties" && <PropertiesTab />}
+
+      {showBviImport && (
+        <BviImportModal onClose={() => setShowBviImport(false)} />
+      )}
     </div>
+  );
+}
+
+// ── Completeness Dashboard ──────────────────────────────────────────
+
+const GROUP_LABELS: Record<string, string> = {
+  core_location: "Core / Location",
+  green_building: "Green Building",
+  financial_valuation: "Financial / Valuation",
+  esg_sustainability: "ESG / Sustainability",
+  technical_specs: "Technical Specs",
+};
+
+function CompletenessDashboard() {
+  const [data, setData] = useState<CompletenessResponse | null>(null);
+
+  useEffect(() => {
+    getCompleteness().then(setData).catch(() => {});
+  }, []);
+
+  if (!data) return null;
+
+  const groupAvg = (group: Record<string, { fill_rate: number }>) => {
+    const vals = Object.values(group);
+    if (vals.length === 0) return 0;
+    return vals.reduce((s, v) => s + v.fill_rate, 0) / vals.length;
+  };
+
+  const barColor = (rate: number) =>
+    rate >= 0.8
+      ? "bg-garbe-grun"
+      : rate >= 0.4
+        ? "bg-garbe-ocker"
+        : "bg-garbe-rot";
+
+  return (
+    <div className="mb-6 border border-garbe-neutral rounded-lg bg-white p-4">
+      <h3 className="text-sm font-semibold text-garbe-blau uppercase tracking-wider mb-3">
+        Property Field Completeness
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {Object.entries(data.property_groups).map(([key, group]) => {
+          const avg = groupAvg(group.fields);
+          return (
+            <div key={key} className="rounded-lg border border-garbe-neutral p-3">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs font-semibold text-garbe-blau">
+                  {GROUP_LABELS[key] || key}
+                </span>
+                <span className="text-xs text-garbe-blau-60">
+                  {Math.round(avg * 100)}%
+                </span>
+              </div>
+              <div className="w-full h-2 bg-garbe-neutral rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${barColor(avg)}`}
+                  style={{ width: `${Math.round(avg * 100)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {Object.keys(data.tenant_fields).length > 0 && (
+        <>
+          <h3 className="text-sm font-semibold text-garbe-blau uppercase tracking-wider mt-4 mb-3">
+            Tenant Field Completeness
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {Object.entries(data.tenant_fields).map(([field, stat]) => (
+              <div key={field} className="rounded-lg border border-garbe-neutral p-3">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-garbe-blau">
+                    {field.replace(/_/g, " ")}
+                  </span>
+                  <span className="text-xs text-garbe-blau-60">
+                    {stat.filled}/{stat.total}
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-garbe-neutral rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${barColor(stat.fill_rate)}`}
+                    style={{ width: `${Math.round(stat.fill_rate * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── BVI Import Modal ───────────────────────────────────────────────
+
+function BviImportModal({ onClose }: { onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<BviImportPreview | null>(null);
+  const [result, setResult] = useState<BviImportResult | null>(null);
+  const [mode, setMode] = useState<"fill_gaps" | "overwrite">("fill_gaps");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleFileSelect = async (f: File) => {
+    setFile(f);
+    setError("");
+    setPreview(null);
+    setResult(null);
+    setLoading(true);
+    try {
+      const p = await previewBviImport(f);
+      setPreview(p);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Preview failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExecute = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError("");
+    try {
+      const r = await executeBviImport(file, mode);
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title="Import BVI File" onClose={onClose}>
+      {!result ? (
+        <>
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-garbe-blau mb-2 uppercase tracking-wider">
+              BVI XLSX File
+            </label>
+            <input
+              type="file"
+              accept=".xlsx"
+              className="form-input w-full text-sm"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFileSelect(f);
+              }}
+            />
+          </div>
+
+          {loading && (
+            <p className="text-sm text-garbe-blau-60 mb-4">Processing...</p>
+          )}
+
+          {error && (
+            <p className="text-sm text-garbe-rot mb-4">{error}</p>
+          )}
+
+          {preview && (
+            <div className="mb-4 space-y-3">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="rounded-lg border border-garbe-neutral p-3">
+                  <div className="text-2xl font-bold text-garbe-blau">
+                    {preview.properties_found}
+                  </div>
+                  <div className="text-xs text-garbe-blau-60">Properties</div>
+                </div>
+                <div className="rounded-lg border border-garbe-grun/30 bg-garbe-grun/5 p-3">
+                  <div className="text-2xl font-bold text-garbe-grun">
+                    {preview.new_properties.length}
+                  </div>
+                  <div className="text-xs text-garbe-blau-60">New</div>
+                </div>
+                <div className="rounded-lg border border-garbe-ocker/30 bg-garbe-ocker/5 p-3">
+                  <div className="text-2xl font-bold text-garbe-ocker">
+                    {preview.existing_properties.length}
+                  </div>
+                  <div className="text-xs text-garbe-blau-60">Existing</div>
+                </div>
+              </div>
+
+              {preview.bvi_fund_ids.length > 0 && (
+                <div className="text-xs text-garbe-blau-60">
+                  Funds: {preview.bvi_fund_ids.join(", ")}
+                </div>
+              )}
+
+              {preview.warnings.length > 0 && (
+                <div className="text-xs text-garbe-ocker">
+                  {preview.warnings.length} warning(s)
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-semibold text-garbe-blau mb-2 uppercase tracking-wider">
+                  Import Mode
+                </label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 text-sm text-garbe-blau cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={mode === "fill_gaps"}
+                      onChange={() => setMode("fill_gaps")}
+                    />
+                    Fill gaps only
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-garbe-blau cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={mode === "overwrite"}
+                      onChange={() => setMode("overwrite")}
+                    />
+                    Overwrite existing
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <ModalActions
+            onCancel={onClose}
+            onConfirm={handleExecute}
+            disabled={!preview || loading}
+          />
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3 text-center mb-4">
+            <div className="rounded-lg border border-garbe-grun/30 bg-garbe-grun/5 p-3">
+              <div className="text-2xl font-bold text-garbe-grun">
+                {result.created}
+              </div>
+              <div className="text-xs text-garbe-blau-60">Created</div>
+            </div>
+            <div className="rounded-lg border border-garbe-ocker/30 bg-garbe-ocker/5 p-3">
+              <div className="text-2xl font-bold text-garbe-ocker">
+                {result.updated}
+              </div>
+              <div className="text-xs text-garbe-blau-60">Updated</div>
+            </div>
+            <div className="rounded-lg border border-garbe-neutral p-3">
+              <div className="text-2xl font-bold text-garbe-blau-60">
+                {result.skipped}
+              </div>
+              <div className="text-xs text-garbe-blau-60">Skipped</div>
+            </div>
+          </div>
+
+          {result.warnings.length > 0 && (
+            <div className="text-xs text-garbe-ocker mb-4">
+              {result.warnings.length} warning(s) during import
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              className="px-4 py-2 text-sm font-semibold bg-garbe-blau text-white rounded-lg hover:bg-garbe-blau-80 transition-colors"
+              onClick={onClose}
+            >
+              Done
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -317,13 +629,30 @@ function TenantsTab() {
     setFormAlias("");
   };
 
+  const [suggestions, setSuggestions] = useState<FuzzyMatch[]>([]);
+  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const openCreate = (prefillAlias?: string) => {
     resetForm();
+    setSuggestions([]);
     if (prefillAlias) {
       setFormName(prefillAlias);
       setFormAlias(prefillAlias);
+      suggestTenants(prefillAlias).then(setSuggestions).catch(() => {});
     }
     setShowCreate(true);
+  };
+
+  const handleNameChange = (val: string) => {
+    setFormName(val);
+    if (suggestTimer.current) clearTimeout(suggestTimer.current);
+    if (val.length >= 2) {
+      suggestTimer.current = setTimeout(() => {
+        suggestTenants(val).then(setSuggestions).catch(() => {});
+      }, 300);
+    } else {
+      setSuggestions([]);
+    }
   };
 
   const openEdit = (t: TenantMaster) => {
@@ -469,11 +798,28 @@ function TenantsTab() {
 
       {showCreate && (
         <Modal title="Add Tenant" onClose={() => setShowCreate(false)}>
+          {suggestions.length > 0 && (
+            <div className="mb-3 rounded-lg border border-garbe-ocker/30 bg-garbe-ocker/5 p-3">
+              <div className="text-xs font-semibold text-garbe-ocker uppercase tracking-wider mb-2">
+                Similar existing tenants
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((s) => (
+                  <span
+                    key={s.id}
+                    className="text-xs px-2 py-1 bg-garbe-ocker/20 text-garbe-ocker rounded"
+                  >
+                    {s.name} ({Math.round(s.score * 100)}%)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <FormField label="Canonical Name">
             <input
               className="form-input"
               value={formName}
-              onChange={(e) => setFormName(e.target.value)}
+              onChange={(e) => handleNameChange(e.target.value)}
             />
           </FormField>
           <FormField label="BVI Tenant ID">
@@ -549,6 +895,7 @@ function PropertiesTab() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<PropertyMaster | null>(null);
+  const [showExcelImport, setShowExcelImport] = useState(false);
 
   const [formPropId, setFormPropId] = useState("");
   const [formFund, setFormFund] = useState("");
@@ -631,10 +978,28 @@ function PropertiesTab() {
         onQuickCreate={(id) => openCreate(id)}
       />
 
-      <div className="flex gap-4 mb-4 items-end">
+      <div className="flex gap-2 mb-4 items-end flex-wrap">
         <SearchInput value={search} onChange={setSearch} />
+        <a
+          href={exportPropertiesUrl()}
+          className="px-3 py-2 text-sm font-semibold border border-garbe-blau text-garbe-blau rounded-lg hover:bg-garbe-blau hover:text-white transition-colors whitespace-nowrap"
+        >
+          Download XLSX
+        </a>
         <button
-          className="px-4 py-2 text-sm font-semibold bg-garbe-grun text-white rounded-lg hover:bg-garbe-grun-80 transition-colors"
+          className="px-3 py-2 text-sm font-semibold border border-garbe-blau text-garbe-blau rounded-lg hover:bg-garbe-blau hover:text-white transition-colors whitespace-nowrap"
+          onClick={() => setShowExcelImport(true)}
+        >
+          Upload &amp; Diff
+        </button>
+        <Link
+          href="/master-data/properties/grid"
+          className="px-3 py-2 text-sm font-semibold border border-garbe-blau text-garbe-blau rounded-lg hover:bg-garbe-blau hover:text-white transition-colors whitespace-nowrap"
+        >
+          Grid Editor
+        </Link>
+        <button
+          className="px-3 py-2 text-sm font-semibold bg-garbe-grun text-white rounded-lg hover:bg-garbe-grun-80 transition-colors whitespace-nowrap"
           onClick={() => openCreate()}
         >
           Add Property
@@ -657,7 +1022,12 @@ function PropertiesTab() {
             className={`hover:bg-garbe-neutral/50 ${i % 2 === 1 ? "bg-garbe-offwhite" : ""}`}
           >
             <td className="px-3 py-2 text-garbe-blau font-semibold">
-              {p.property_id}
+              <Link
+                href={`/master-data/properties/${p.id}`}
+                className="hover:underline"
+              >
+                {p.property_id}
+              </Link>
             </td>
             <td className="px-3 py-2 text-garbe-blau-80">
               {p.fund_csv_name || "—"}
@@ -765,7 +1135,185 @@ function PropertiesTab() {
           />
         </Modal>
       )}
+
+      {showExcelImport && (
+        <ExcelImportModal
+          onClose={() => {
+            setShowExcelImport(false);
+            load();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+// ── Excel Import Modal ─────────────────────────────────────────────
+
+function ExcelImportModal({ onClose }: { onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [diffs, setDiffs] = useState<ExcelDiff[] | null>(null);
+  const [result, setResult] = useState<ExcelApplyResult | null>(null);
+  const [mode, setMode] = useState<"fill_gaps" | "overwrite">("fill_gaps");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleFileSelect = async (f: File) => {
+    setFile(f);
+    setError("");
+    setDiffs(null);
+    setResult(null);
+    setLoading(true);
+    try {
+      const preview = await previewExcelImport(f);
+      setDiffs(preview.diffs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Preview failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApply = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError("");
+    try {
+      const r = await applyExcelImport(file, mode);
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Apply failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal title="Upload & Diff Properties" onClose={onClose}>
+      {!result ? (
+        <>
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-garbe-blau mb-2 uppercase tracking-wider">
+              XLSX File
+            </label>
+            <input
+              type="file"
+              accept=".xlsx"
+              className="form-input w-full text-sm"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleFileSelect(f);
+              }}
+            />
+          </div>
+
+          {loading && <p className="text-sm text-garbe-blau-60 mb-4">Processing...</p>}
+          {error && <p className="text-sm text-garbe-rot mb-4">{error}</p>}
+
+          {diffs !== null && (
+            <div className="mb-4">
+              {diffs.length === 0 ? (
+                <p className="text-sm text-garbe-blau-60">No changes detected.</p>
+              ) : (
+                <>
+                  <p className="text-sm text-garbe-blau mb-2">
+                    {diffs.length} change(s) detected:
+                  </p>
+                  <div className="max-h-60 overflow-y-auto border border-garbe-neutral rounded">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-garbe-blau-20/40 sticky top-0">
+                        <tr>
+                          <th className="px-2 py-1 text-left">Property</th>
+                          <th className="px-2 py-1 text-left">Field</th>
+                          <th className="px-2 py-1 text-left">Current</th>
+                          <th className="px-2 py-1 text-left">New</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-garbe-neutral">
+                        {diffs.map((d, i) => (
+                          <tr
+                            key={i}
+                            className={
+                              d.change_type === "add"
+                                ? "bg-garbe-grun/5"
+                                : "bg-garbe-ocker/5"
+                            }
+                          >
+                            <td className="px-2 py-1">{d.property_id}</td>
+                            <td className="px-2 py-1">{d.field}</td>
+                            <td className="px-2 py-1 text-garbe-blau-60">
+                              {d.current_value || "—"}
+                            </td>
+                            <td className="px-2 py-1 font-semibold">
+                              {d.new_value}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3">
+                    <label className="block text-sm font-semibold text-garbe-blau mb-2 uppercase tracking-wider">
+                      Apply Mode
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 text-sm text-garbe-blau cursor-pointer">
+                        <input
+                          type="radio"
+                          checked={mode === "fill_gaps"}
+                          onChange={() => setMode("fill_gaps")}
+                        />
+                        Fill gaps only
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-garbe-blau cursor-pointer">
+                        <input
+                          type="radio"
+                          checked={mode === "overwrite"}
+                          onChange={() => setMode("overwrite")}
+                        />
+                        Overwrite existing
+                      </label>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          <ModalActions
+            onCancel={onClose}
+            onConfirm={handleApply}
+            disabled={!diffs || diffs.length === 0 || loading}
+          />
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3 text-center mb-4">
+            <div className="rounded-lg border border-garbe-grun/30 bg-garbe-grun/5 p-3">
+              <div className="text-2xl font-bold text-garbe-grun">{result.created}</div>
+              <div className="text-xs text-garbe-blau-60">Created</div>
+            </div>
+            <div className="rounded-lg border border-garbe-ocker/30 bg-garbe-ocker/5 p-3">
+              <div className="text-2xl font-bold text-garbe-ocker">{result.updated}</div>
+              <div className="text-xs text-garbe-blau-60">Updated</div>
+            </div>
+            <div className="rounded-lg border border-garbe-neutral p-3">
+              <div className="text-2xl font-bold text-garbe-blau-60">{result.skipped}</div>
+              <div className="text-xs text-garbe-blau-60">Skipped</div>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              className="px-4 py-2 text-sm font-semibold bg-garbe-blau text-white rounded-lg hover:bg-garbe-blau-80 transition-colors"
+              onClick={onClose}
+            >
+              Done
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 
