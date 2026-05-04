@@ -80,6 +80,12 @@ export default function RootLayout({
                   Reports
                 </Link>
                 <Link
+                  href="/export"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Export
+                </Link>
+                <Link
                   href="/chat"
                   className="text-garbe-blau-20 hover:text-white transition-colors"
                 >

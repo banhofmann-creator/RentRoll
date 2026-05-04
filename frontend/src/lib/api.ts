@@ -739,6 +739,78 @@ export function periodExportUrl(periodId: number): string {
   return `${API_BASE}/api/periods/${periodId}/export`;
 }
 
+// --- Export ---
+
+export interface ChannelInfo {
+  name: string;
+  description: string;
+}
+
+export interface InvestorPackPreview {
+  filename: string;
+  file_count: number;
+  files: string[];
+}
+
+export interface PushResult {
+  success: boolean;
+  channel: string;
+  files_pushed: number;
+  destination: string;
+  errors: string[];
+}
+
+export async function getExportChannels(): Promise<ChannelInfo[]> {
+  const res = await fetch(`${API_BASE}/api/export/channels`);
+  if (!res.ok) throw new Error("Failed to fetch export channels");
+  return res.json();
+}
+
+export async function previewInvestorPack(
+  periodId: number,
+  fund?: string
+): Promise<InvestorPackPreview> {
+  const sp = new URLSearchParams({ period_id: String(periodId) });
+  if (fund) sp.set("fund", fund);
+
+  const res = await fetch(
+    `${API_BASE}/api/export/investor-pack/preview?${sp.toString()}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Preview failed" }));
+    throw new Error(err.detail || "Preview failed");
+  }
+  return res.json();
+}
+
+export function investorPackUrl(periodId: number, fund?: string): string {
+  const sp = new URLSearchParams({ period_id: String(periodId) });
+  if (fund) sp.set("fund", fund);
+  return `${API_BASE}/api/export/investor-pack?${sp.toString()}`;
+}
+
+export async function pushToChannel(
+  periodId: number,
+  channel: string,
+  fund?: string
+): Promise<PushResult> {
+  const res = await fetch(`${API_BASE}/api/export/push`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      period_id: periodId,
+      channel,
+      fund: fund || undefined,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Push failed" }));
+    throw new Error(err.detail || "Push failed");
+  }
+  return res.json();
+}
+
 // --- Analytics ---
 
 export interface PeriodKPI {

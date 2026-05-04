@@ -1,0 +1,78 @@
+Implement Phase 9 of the RentRoll project: Output Channels & Integrations. This builds on 8 completed phases (226 tests, last commit 92774e9). Read CLAUDE.md and planning/PLAN.md Phase 9 plus planning/spec-architecture.md section 4 for full context.
+
+What to build (6 steps):
+
+Step 1 — Output Channel Plugin System (backend/app/channels/)
+
+The channels/__init__.py already exists (empty). Create:
+
+- base.py: Abstract OutputChannel base class with push(files, metadata) -> PushResult and test_connection() -> bool. Dataclasses: ExportFile (filename, content: bytes, file_type: str, category: str), ExportMetadata (stichtag, fund, properties: list[str], reporting_period_id), PushResult (success, channel, files_pushed, destination, errors). Follow the interface in spec-architecture.md section 4.
+- local_filesystem.py: LocalFilesystemChannel — saves files to exports/{fund}/{stichtag}/ folder tree. Creates dirs as needed.
+- registry.py: Channel registry with get_channel(name), list_channels(), register_channel(name, cls). Pre-registers local_filesystem.
+
+Step 2 — Investor Reporting Pack Generator (backend/app/core/investor_pack.py)
+
+Function generate_investor_pack(db, period_id, fund=None) -> (zip_bytes, filename, list[ExportFile]):
+- Looks up the ReportingPeriod and its CsvUpload
+- Generates BVI XLSX via generate_bvi_xlsx(db, upload_id, stichtag, is_draft)
+- Generates portfolio overview PPTX via generate_portfolio_overview(db, upload_id)
+- Generates lease expiry profile PPTX via generate_lease_expiry_profile(db, upload_id)
+- Per fund: generates fund summary PPTX via generate_fund_summary(db, upload_id, fund_name)
+- Per property in the fund(s): generates factsheet PPTX via generate_property_factsheet(db, upload_id, property_id)
+- Wraps all into ExportFile objects, bundles into a ZIP
+- If fund is None, include all funds from the upload
+- Returns (zip_bytes, zip_filename, export_files_list)
+
+The slide generators are in backend/app/core/slides.py and return io.BytesIO. The BVI export is in backend/app/core/bvi_export.py and returns bytes.
+
+Step 3 — Export API (backend/app/api/export.py)
+
+Create a FastAPI router (prefix="/export", tags=["export"]):
+
+- GET /api/export/channels — returns list of available channels (name + description)
+- POST /api/export/investor-pack?period_id=&fund= — generates and streams ZIP download
+- POST /api/export/investor-pack/preview?period_id=&fund= — returns file manifest (filename, file_count, file list) without downloading
+- POST /api/export/push — body: {period_id, channel, fund?}. Generates investor pack, pushes via channel, returns PushResult.
+
+Register the router in backend/app/main.py following the existing pattern (import + app.include_router(export_router, prefix="/api")).
+
+Step 4 — Frontend Export Dashboard (frontend/src/app/export/page.tsx)
+
+IMPORTANT: Read the Next.js guide at node_modules/next/dist/docs/ before writing frontend code — this project uses Next.js App Router with potentially breaking changes from standard patterns.
+
+Build a page with:
+- Period selector dropdown (fetch from GET /api/periods, filter to show stichtag + status)
+- Fund filter dropdown (optional, fetch from GET /api/reports/available-funds?upload_id= using the period's upload_id)
+- Preview Pack button that calls investor-pack/preview, shows file manifest table
+- Download Pack button that triggers investor-pack download (new tab)
+- Push to Channel section: channel dropdown (from GET /api/export/channels), push button, result display
+- Use GARBE design system (garbe-blau, garbe-grun etc.) matching existing pages. See frontend/src/app/reports/page.tsx for the closest pattern.
+
+Add Export nav link in frontend/src/app/layout.tsx after Reports and before Chat.
+
+Step 5 — Frontend API Client (frontend/src/lib/api.ts)
+
+Add interfaces and functions:
+- ChannelInfo (name, description), InvestorPackPreview (filename, file_count, files: string[]), PushResult (success, channel, files_pushed, destination, errors: string[])
+- getExportChannels(), previewInvestorPack(periodId, fund?), investorPackUrl(periodId, fund?), pushToChannel(periodId, channel, fund?)
+
+Follow the existing patterns in api.ts (API_BASE, fetch + error handling).
+
+Step 6 — Tests (backend/tests/test_export.py)
+
+Write tests using the existing conftest.py fixtures (client, db, sample_csv_bytes). Follow the pattern in test_reports.py and test_periods.py. Tests needed:
+
+- Channel system: list_channels returns local_filesystem, get_channel returns instance, test_connection works, push writes files to disk (use tmp_path), push result correct
+- Investor pack: generates valid ZIP with expected files (BVI xlsx, portfolio pptx, fund pptx, factsheets), fund filter works, period not found raises ValueError
+- API: GET /channels returns list, POST investor-pack returns ZIP, POST investor-pack/preview returns manifest, POST push to local_filesystem succeeds, period not found returns 404, invalid channel returns 400
+
+For tests that need data in the DB, follow the pattern from test_periods.py — create a CsvUpload + RawRentRoll rows + ReportingPeriod, then call the endpoints.
+
+Constraints:
+
+- Python 3.14 — matplotlib bar charts have a deepcopy recursion bug. The existing slides.py already works around this with native pptx charts. Do not change slides.py.
+- SQLite for tests (file-based test.db), PostgreSQL in production. Use SQLAlchemy ORM only.
+- Tests must run with cd backend && pytest — all 226 existing tests must still pass.
+- No new pip dependencies needed (openpyxl, python-pptx, matplotlib already installed).
+- Do NOT modify existing test files or conftest.py.
+- Update planning/Review.md with a Phase 9 entry following the existing format (status, date, what was built, test coverage, files changed, deferred items).

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.analytics import router as analytics_router
 from app.api.bvi_import import router as bvi_import_router
 from app.api.chat import router as chat_router
+from app.api.export import router as export_router
 from app.api.reports import router as reports_router
 from app.api.excel_roundtrip import router as excel_roundtrip_router
 from app.api.inconsistencies import router as inconsistency_router
@@ -49,6 +50,7 @@ app.include_router(bvi_import_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
+app.include_router(export_router, prefix="/api")
 
 
 @app.get("/api/health")

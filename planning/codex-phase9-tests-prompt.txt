@@ -1,0 +1,56 @@
+Phase 9 of the RentRoll project was just implemented. The code is in place but tests and Review.md are missing. You need to do two things:
+
+1. Write backend/tests/test_export.py
+2. Update planning/Review.md with a Phase 9 entry
+
+Read CLAUDE.md for project conventions. Read the existing test files for patterns, especially:
+- backend/tests/conftest.py (shared fixtures: client, db, sample_csv_bytes)
+- backend/tests/test_periods.py (how to create CsvUpload + RawRentRoll + ReportingPeriod for test data)
+- backend/tests/test_reports.py (how to test streaming/download endpoints)
+
+The Phase 9 code to test is in:
+- backend/app/channels/base.py (ExportFile, ExportMetadata, PushResult, OutputChannel ABC)
+- backend/app/channels/local_filesystem.py (LocalFilesystemChannel)
+- backend/app/channels/registry.py (get_channel, list_channels, register_channel)
+- backend/app/core/investor_pack.py (generate_investor_pack)
+- backend/app/api/export.py (4 endpoints: GET /channels, POST /investor-pack, POST /investor-pack/preview, POST /push)
+
+Tests to write in backend/tests/test_export.py:
+
+Channel system tests:
+- list_channels returns at least local_filesystem with correct name/description
+- get_channel("local_filesystem") returns a LocalFilesystemChannel instance
+- get_channel("nonexistent") raises ValueError
+- test_connection on LocalFilesystemChannel returns True (use tmp_path fixture)
+- push writes files to correct directory structure ({fund}/{stichtag}/), verify files exist on disk and contents match
+- push result has success=True, correct files_pushed count, destination path
+
+Investor pack tests (these need a CsvUpload with RawRentRoll data rows and a ReportingPeriod):
+- generate_investor_pack returns valid ZIP bytes containing expected files (at minimum: BVI xlsx, portfolio_overview pptx, lease_expiry_profile pptx)
+- fund filter: passing a specific fund name only includes that fund's files
+- period not found raises ValueError
+
+API endpoint tests:
+- GET /api/export/channels returns 200 with list containing local_filesystem
+- POST /api/export/investor-pack with valid period_id returns 200 ZIP response
+- POST /api/export/investor-pack/preview with valid period_id returns 200 with filename, file_count, files list
+- POST /api/export/investor-pack with nonexistent period_id returns 404
+- POST /api/export/push with valid period_id and channel="local_filesystem" returns 200 with success=True
+- POST /api/export/push with invalid channel returns 400
+
+For test data setup, follow this pattern from test_periods.py:
+- Create a CsvUpload(filename="test.csv", status="complete", stichtag=date(2025,3,31), fund_label="TESTFUND")
+- Create several RawRentRoll rows with row_type="data", fund="TESTFUND", property_id="1001", tenant_name="TestTenant", area_sqm=100.0, annual_net_rent=12000.0
+- Create a ReportingPeriod(stichtag=date(2025,3,31), upload_id=upload.id, status="draft")
+
+Do NOT modify any existing test files or conftest.py.
+
+Run "cd backend && python -m pytest tests/test_export.py -v" to verify your tests pass.
+Run "cd backend && python -m pytest --tb=short -q" to verify all tests (226 existing + new) pass with no regressions.
+
+For the Review.md update, add a Phase 9 entry at the bottom following the exact format of the existing entries (see Phase 8 for reference). Include:
+- Status: Complete, Date: 2026-05-04
+- What was built (all 6 components)
+- Test coverage (count of new tests, what they cover)
+- Files changed (new and modified)
+- Deferred items: SharePoint/Box/Drooms channel plugins, Celery job queue migration, additional parser plugins, scheduled/automated exports

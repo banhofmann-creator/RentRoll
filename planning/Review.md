@@ -728,3 +728,141 @@ Full suite: **226 tests passing** in ~21s, no regressions.
 - Comparison reports (two periods side by side)
 - Chart color customization per fund/property
 - Batch report generation (all properties at once)
+
+---
+
+## Phase 9: Output Channels & Integrations
+
+**Status:** Complete  
+**Date:** 2026-05-04
+
+### What was built
+
+**Output channel plugin system** (`backend/app/channels/`)
+- `base.py`: Added the Phase 9 channel contract from `spec-architecture.md` §4:
+  - `OutputChannel` abstract base with `push(files, metadata)` and `test_connection()`
+  - dataclasses `ExportFile`, `ExportMetadata`, and `PushResult`
+- `local_filesystem.py`: Implemented `LocalFilesystemChannel`, which writes generated files into `exports/{fund}/{stichtag}/` and reports structured push results.
+- `registry.py`: Added channel registration and lookup helpers (`register_channel`, `get_channel`, `list_channels`) with `local_filesystem` pre-registered.
+- `channels/__init__.py`: Exported the channel types and registry helpers for consistent imports.
+
+**Investor reporting pack generator** (`backend/app/core/investor_pack.py`)
+- Added `generate_investor_pack(db, period_id, fund=None) -> (zip_bytes, filename, list[ExportFile])`.
+- Resolves the `ReportingPeriod` and its `CsvUpload`, determines fund/property scope, and assembles:
+  - BVI XLSX via `generate_bvi_xlsx(...)`
+  - portfolio overview PPTX
+  - lease expiry profile PPTX
+  - one fund summary PPTX per included fund
+  - one property factsheet PPTX per included property
+- Wraps every generated asset as an `ExportFile`, then bundles the pack into a ZIP archive for API download or channel push.
+- Supports all-fund packs and fund-filtered packs without touching the existing slide/BVI generators.
+
+**Export API** (`backend/app/api/export.py`)
+- Added `GET /api/export/channels` to surface available channels and descriptions.
+- Added `POST /api/export/investor-pack?period_id=&fund=` to generate and stream the investor-pack ZIP.
+- Added `POST /api/export/investor-pack/preview?period_id=&fund=` to return the pack manifest (`filename`, `file_count`, `files`).
+- Added `POST /api/export/push` to generate the pack, resolve a channel via the registry, and return the `PushResult`.
+- Registered the router in `backend/app/main.py` under `/api`.
+
+**Frontend export dashboard** (`frontend/src/app/export/page.tsx`)
+- Added a new App Router client page for the export workflow:
+  - reporting period selector using `GET /api/periods`
+  - optional fund selector driven by `GET /api/reports/available-funds?upload_id=...`
+  - preview action showing a file manifest table
+  - download action that submits a `POST` request in a new tab for the ZIP response
+  - push-to-channel section with result feedback
+- Styled to match the existing GARBE pages and inserted an `Export` nav link between `Reports` and `Chat`.
+
+**Frontend API client** (`frontend/src/lib/api.ts`)
+- Added `ChannelInfo`, `InvestorPackPreview`, and `PushResult` interfaces.
+- Added `getExportChannels()`, `previewInvestorPack()`, `investorPackUrl()`, and `pushToChannel()` following the existing `API_BASE` + fetch/error-handling pattern.
+
+### Test coverage
+
+13 new tests in `backend/tests/test_export.py`:
+- Channel registry coverage for `list_channels`, valid lookup, and invalid lookup.
+- Local filesystem channel coverage for `test_connection()`, directory creation, file writes, file contents, pushed-file count, and destination reporting.
+- Investor pack coverage for ZIP generation, expected BVI/PPTX filenames, fund-filtered output, and missing-period error handling.
+- Export API coverage for channel discovery, ZIP download, preview manifest, successful local filesystem push, missing period (404), and invalid channel (400).
+
+Validation run:
+- `cd backend && python -m pytest tests/test_export.py -v` → 13 passed
+- `cd backend && python -m pytest --tb=short -q` → 239 passed, ~20s
+- `cd frontend && npx next build` → clean (15 routes)
+
+### Files changed
+
+| File | Action |
+|---|---|
+| `backend/app/channels/base.py` | Created — output channel ABC and dataclasses |
+| `backend/app/channels/local_filesystem.py` | Created — local filesystem output channel |
+| `backend/app/channels/registry.py` | Created — channel registry and pre-registration |
+| `backend/app/channels/__init__.py` | Modified — exported channel types/helpers |
+| `backend/app/core/investor_pack.py` | Created — investor pack assembly and ZIP bundling |
+| `backend/app/api/export.py` | Created — export channel listing, preview, download, push endpoints |
+| `backend/app/main.py` | Modified — registered export router |
+| `backend/tests/test_export.py` | Created — 13 Phase 9 tests |
+| `frontend/src/app/export/page.tsx` | Created — export dashboard UI |
+| `frontend/src/app/layout.tsx` | Modified — added Export nav link |
+| `frontend/src/lib/api.ts` | Modified — export API types and client helpers |
+
+### Codex review findings (fixed by Claude Code)
+
+| Finding | Severity | Fix |
+|---|---|---|
+| `tmp_path` fixture fails on Windows with `PermissionError` on `C:\Users\...\AppData\Local\Temp\pytest-of-*` | P1 (2 tests erroring) | Replaced pytest's `tmp_path` with a custom fixture using `Path.cwd() / ".tmp_export_tests"` + `uuid4` subdirs + `shutil.rmtree` cleanup |
+| Review.md reported "12 tests / 238 passed" but actual count was 13 tests / 239 passed | P3 | Corrected counts |
+
+### Deferred
+
+- SharePoint / Box / Drooms output channel plugins
+- Celery job queue migration for export and push workflows
+- Additional parser plugins for non-GARBE rent roll formats
+- Scheduled / automated exports
+
+---
+
+## Codex Workflow Lessons Learned
+
+**Accumulated across Phases 2–9. Kept here so future sessions can reuse the workflow without re-deriving it.**
+
+### Running Codex from Claude Code
+
+- **CLI**: `codex exec -s workspace-write -C "C:/projects/RentRoll" -o "<output-file>" < <prompt-file>`
+- **Prompt via stdin**: Codex reads from stdin when no positional prompt is given. Write the prompt to a file first, then pipe it with `cat prompt.txt | codex exec ...`. Heredocs in Bash tool calls are unreliable (Codex hangs on "Reading additional input from stdin...").
+- **Do not use `--approval-mode`** — that flag does not exist. The correct flag is `-s workspace-write` (sandbox policy). Available values: `read-only`, `workspace-write`, `danger-full-access`.
+- **Output file** (`-o`): Codex writes its final summary to this file. Useful for review reports but not essential — the real deliverables are the file changes on disk.
+- **Timeout**: Codex implementations typically take 3–8 minutes. Use `run_in_background: true` with a 600s timeout.
+
+### Prompt design
+
+- **Write the prompt to a file** (`planning/codex-<phase>-prompt.txt`) rather than inline. This makes it reviewable, rerunnable, and avoids shell escaping issues.
+- **Be explicit about file paths and function signatures.** Codex follows instructions literally — vague descriptions lead to structural mismatches. Name every file to create, every function signature, every endpoint path.
+- **Reference existing code by path for patterns.** "Follow the pattern in test_reports.py" works better than describing the pattern abstractly.
+- **List constraints explicitly.** Python version, test runner expectations, "do not modify existing files" — Codex respects these when stated clearly.
+- **Split implementation and tests into separate prompts** if the implementation is large (6+ files). Codex sometimes skips tests or Review.md when the main implementation is complex. A focused second prompt for tests + docs is more reliable.
+
+### Review checklist (Claude Code after Codex)
+
+1. `git status` — verify expected files were created/modified, no unexpected changes
+2. Run existing tests (`pytest --tb=short -q`) — check for regressions before looking at new code
+3. Read every new file Codex created — check for:
+   - Correct imports and no circular dependencies
+   - Proper error handling (HTTPException codes match spec)
+   - Windows compatibility (file paths, temp directories, permissions)
+   - Pattern consistency with existing codebase
+4. Run new tests in isolation (`pytest tests/test_<new>.py -v`) — identify failures
+5. Fix platform-specific issues (Windows `tmp_path`, path separators, encoding)
+6. Run full suite again to confirm fix doesn't regress
+7. Verify frontend builds (`npx next build`) — Codex sometimes generates TSX that fails type-checking
+8. Update Review.md with accurate test counts and fix Codex's self-reported numbers if they're wrong
+
+### Common Codex issues on this project
+
+| Issue | Frequency | Workaround |
+|---|---|---|
+| Skips tests when implementation prompt is large | 2/4 phases | Send a separate test-focused prompt |
+| Skips Review.md update | 1/4 phases | Include in test prompt as fallback |
+| `tmp_path` pytest fixture fails on Windows | Every phase with filesystem tests | Use custom fixture with `tempfile.mkdtemp()` or project-local `.tmp_*` dir |
+| Self-reports wrong test counts in Review.md | 2/4 phases | Always verify with actual `pytest` run and correct |
+| Uses sample CSV data in tests instead of synthetic | First attempt on 2 phases | Explicitly say "create synthetic test data, do NOT use sample files" |
