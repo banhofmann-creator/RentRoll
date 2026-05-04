@@ -48,9 +48,9 @@ class RawRentRoll(Base):
     row_number: Mapped[int] = mapped_column(Integer)
     row_type: Mapped[str] = mapped_column(String(20))  # data, property_summary, orphan, total
 
-    fund: Mapped[str | None] = mapped_column(String(100))
+    fund: Mapped[str | None] = mapped_column(String(500))
     fund_inherited: Mapped[bool] = mapped_column(Boolean, default=False)
-    property_id: Mapped[str | None] = mapped_column(String(20))
+    property_id: Mapped[str | None] = mapped_column(String(50))
     property_name: Mapped[str | None] = mapped_column(String(500))
     garbe_office: Mapped[str | None] = mapped_column(String(200))
 

@@ -739,6 +739,74 @@ export function periodExportUrl(periodId: number): string {
   return `${API_BASE}/api/periods/${periodId}/export`;
 }
 
+// --- Analytics ---
+
+export interface PeriodKPI {
+  period_id: number;
+  stichtag: string;
+  total_rent: number;
+  total_area: number;
+  vacant_area: number;
+  vacancy_rate: number;
+  tenant_count: number;
+  property_count: number;
+  fair_value: number | null;
+  total_debt: number | null;
+  wault_avg: number | null;
+}
+
+export interface PeriodComparisonMetric {
+  metric: string;
+  period_a_value: number | null;
+  period_b_value: number | null;
+  delta: number | null;
+  delta_pct: number | null;
+}
+
+export interface ComparisonResponse {
+  period_a: string;
+  period_b: string;
+  metrics: PeriodComparisonMetric[];
+}
+
+export interface PropertySnapshot {
+  stichtag: string;
+  rent: number;
+  area: number;
+  vacancy_rate: number;
+  tenant_count: number;
+  fair_value: number | null;
+}
+
+export async function getPortfolioKPIs(
+  status: "finalized" | "all" = "finalized"
+): Promise<PeriodKPI[]> {
+  const res = await fetch(`${API_BASE}/api/analytics/kpis?status=${status}`);
+  if (!res.ok) throw new Error("Failed to fetch KPIs");
+  return res.json();
+}
+
+export async function comparePeriods(
+  periodA: number,
+  periodB: number
+): Promise<ComparisonResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/analytics/compare?period_a=${periodA}&period_b=${periodB}`
+  );
+  if (!res.ok) throw new Error("Failed to compare periods");
+  return res.json();
+}
+
+export async function getPropertyHistory(
+  propertyId: string
+): Promise<PropertySnapshot[]> {
+  const res = await fetch(
+    `${API_BASE}/api/analytics/properties/${encodeURIComponent(propertyId)}/history`
+  );
+  if (!res.ok) throw new Error("Failed to fetch property history");
+  return res.json();
+}
+
 // --- Inconsistency API ---
 
 export async function listInconsistencies(params?: {
@@ -799,6 +867,117 @@ export async function recheckInconsistencies(
   if (!res.ok) throw new Error("Failed to recheck");
   return res.json();
 }
+
+// --- Chat ---
+
+export interface ChatSession {
+  id: number;
+  title: string | null;
+  created_at: string;
+  last_message_at: string | null;
+}
+
+export interface ChatMessageItem {
+  role: string;
+  content: string;
+  tool_calls: Record<string, unknown>[] | null;
+  created_at: string;
+}
+
+export interface PendingConfirmation {
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  tool_use_id: string;
+  description: string;
+}
+
+export interface ChatResponse {
+  session_id: number;
+  message: string;
+  pending_confirmations: PendingConfirmation[];
+  tool_results: Record<string, unknown>[];
+}
+
+export async function listChatSessions(): Promise<ChatSession[]> {
+  const res = await fetch(`${API_BASE}/api/chat/sessions`);
+  if (!res.ok) throw new Error("Failed to fetch sessions");
+  return res.json();
+}
+
+export async function getChatMessages(
+  sessionId: number
+): Promise<ChatMessageItem[]> {
+  const res = await fetch(
+    `${API_BASE}/api/chat/sessions/${sessionId}/messages`
+  );
+  if (!res.ok) throw new Error("Failed to fetch messages");
+  return res.json();
+}
+
+export async function deleteChatSession(sessionId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/chat/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete session");
+}
+
+export async function sendChatMessage(body: {
+  session_id?: number;
+  message: string;
+  confirmed_tool_calls?: string[];
+}): Promise<ChatResponse> {
+  const res = await fetch(`${API_BASE}/api/chat/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Chat failed" }));
+    throw new Error(err.detail || "Chat failed");
+  }
+  return res.json();
+}
+
+// --- Reports ---
+
+export async function getAvailableFunds(uploadId: number): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/api/reports/available-funds?upload_id=${uploadId}`
+  );
+  if (!res.ok) throw new Error("Failed to fetch available funds");
+  return res.json();
+}
+
+export async function getAvailableProperties(
+  uploadId: number
+): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/api/reports/available-properties?upload_id=${uploadId}`
+  );
+  if (!res.ok) throw new Error("Failed to fetch available properties");
+  return res.json();
+}
+
+export function getPropertyFactsheetUrl(
+  uploadId: number,
+  propertyId: string
+): string {
+  return `${API_BASE}/api/reports/property-factsheet?upload_id=${uploadId}&property_id=${encodeURIComponent(propertyId)}`;
+}
+
+export function getPortfolioOverviewUrl(uploadId: number): string {
+  return `${API_BASE}/api/reports/portfolio-overview?upload_id=${uploadId}`;
+}
+
+export function getLeaseExpiryUrl(uploadId: number): string {
+  return `${API_BASE}/api/reports/lease-expiry?upload_id=${uploadId}`;
+}
+
+export function getFundSummaryUrl(uploadId: number, fund: string): string {
+  return `${API_BASE}/api/reports/fund-summary?upload_id=${uploadId}&fund=${encodeURIComponent(fund)}`;
+}
+
+// --- Upload Rows ---
 
 export async function getUploadRows(
   id: number,

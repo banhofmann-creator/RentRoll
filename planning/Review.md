@@ -497,3 +497,234 @@ Full suite: 187 tests passing, no regressions.
 - Snapshot-based export (using frozen snapshot data instead of live master data for finalized periods) — currently both draft and finalized exports use live aggregation
 - Period notes editing — field exists in model but no UI to edit
 - Period comparison view — comparing two periods side by side
+
+---
+
+## Test Suite Optimization
+
+**Status:** Complete  
+**Date:** 2026-04-25
+
+Refactored backend test infrastructure for speed and maintainability:
+
+- **Centralized conftest.py**: All test files now share `test_engine`, `TestSession`, `setup_db` (autouse), `client`, `db` fixtures. Eliminated ~120 lines of duplicated boilerplate across 9 test files.
+- **Table truncation instead of drop/create**: `setup_db` truncates all tables between tests instead of `Base.metadata.drop_all() / create_all()`. Tables created once per session via `_ensure_tables()`.
+- **Cached CSV parse**: `test_inconsistency_detector.py` caches the parsed CSV result in a module-level global, eliminating redundant re-parsing.
+- **Test consolidation**: Merged read-only tests that share the same setup into single test functions (e.g., list/browse/filter → single `test_upload_csv`).
+
+**Result:** 92s → 20s (78% reduction), 192 tests (down from 196 via consolidation, same assertion coverage).
+
+---
+
+## Phase 6: Time-Series Analysis
+
+**Status:** Complete  
+**Date:** 2026-04-25
+
+### What was built
+
+**Analytics API** (`backend/app/api/analytics.py`)
+- `GET /api/analytics/kpis?status=finalized|all` — cross-period portfolio KPIs: total_rent, total_area, vacant_area, vacancy_rate, tenant_count, property_count, fair_value, total_debt, wault_avg. Separate helpers `_csv_kpis()` (from raw_rent_roll via upload_id) and `_snapshot_kpis()` (from snapshot_property_master).
+- `GET /api/analytics/compare?period_a=&period_b=` — side-by-side period comparison with absolute and percentage deltas for all metrics.
+- `GET /api/analytics/properties/{property_id}/history` — per-property time series across finalized periods.
+- Parking (Stellplätze) excluded from area calculations, LEERSTAND excluded from tenant counts, WAULT computed from property_summary rows.
+
+**Frontend Analytics Page** (`frontend/src/app/analytics/page.tsx`)
+- KPI summary cards (8 cards showing latest period values)
+- Rent & Fair Value area chart (dual Y-axis, GARBE-Blau for rent, GARBE-Grün for fair value)
+- Vacancy Rate trend chart (GARBE-Ocker)
+- Period Comparison: dropdown selectors for two periods, comparison table with color-coded deltas (green positive, red negative)
+- Property History: lookup by property ID, bar chart (rent + vacancy), detail table
+- "Include draft periods" toggle
+- Built with Recharts (recharts@2.x)
+
+**API Client** (`frontend/src/lib/api.ts`): Added `PeriodKPI`, `PeriodComparisonMetric`, `ComparisonResponse`, `PropertySnapshot` interfaces and `getPortfolioKPIs()`, `comparePeriods()`, `getPropertyHistory()` functions.
+
+### Test coverage
+
+12 new tests in `test_analytics.py`:
+- KPIs: single period (all fields), multiple periods, draft excluded, draft included with `status=all`, empty, parking excluded from area, WAULT from summary rows
+- Comparison: period-to-period deltas and percentages, not found (404)
+- Property history: multi-period with vacancy, empty property, draft excluded
+
+Full suite: **192 tests passing** in ~20s, no regressions.
+
+### Files changed
+
+| File | Action |
+|---|---|
+| `backend/app/api/analytics.py` | Created — 3 analytics endpoints with KPI helpers |
+| `backend/tests/test_analytics.py` | Created — 12 tests |
+| `backend/app/main.py` | Modified — registered analytics router |
+| `frontend/src/app/analytics/page.tsx` | Created — Recharts dashboard with charts and comparison |
+| `frontend/src/app/layout.tsx` | Modified — added Analytics nav link |
+| `frontend/src/lib/api.ts` | Modified — analytics API types and functions |
+| `frontend/package.json` | Modified — added recharts dependency |
+
+### Deferred
+
+- Fund-level filtering on KPI endpoints (currently portfolio-wide only)
+- Property-level fair value / debt in property history (currently only portfolio-level in KPIs)
+- Exportable chart images / PDF reports
+
+---
+
+## Phase 7: AI Chatbot
+
+**Status:** Complete  
+**Date:** 2026-04-26
+
+### What was built
+
+**Chat Tool System** (`backend/app/core/chat_tools.py`)
+- 11 tool definitions for the Claude API tool_use interface:
+  - **Read tools** (execute immediately): `query_raw_data` (filtered rent roll rows), `query_portfolio_summary` (aggregated KPIs), `search_tenants` (by canonical name or alias), `list_properties` (with search), `list_inconsistencies` (filtered by category/severity/status), `list_periods`, `compare_periods` (cross-period deltas)
+  - **Write tools** (require user confirmation): `update_tenant`, `update_property`, `update_fund_mapping`, `resolve_inconsistency`
+- All write tools use the audit system (`log_changes` with `changed_by="chatbot"`) for full traceability
+- Field validation for property updates (rejects unknown column names)
+- `WRITE_TOOLS` set for confirmation gating; `execute_tool()` dispatcher
+
+**Chat API** (`backend/app/api/chat.py`)
+- `GET /api/chat/sessions` — list recent sessions
+- `GET /api/chat/sessions/{id}/messages` — get conversation history
+- `DELETE /api/chat/sessions/{id}` — delete session
+- `POST /api/chat/message` — send message, returns response with tool results and pending confirmations
+- Domain-specific system prompt with GARBE/BVI terminology and safety instructions
+- Multi-turn tool loop: up to 10 iterations of Claude calling tools and receiving results
+- Confirmation workflow: write tool calls are blocked until the user sends `confirmed_tool_calls` IDs
+- Messages persisted in `chat_sessions` + `chat_messages` tables (already existed from Phase 1 schema)
+- Uses `claude-sonnet-4-6` model via Anthropic SDK
+
+**Frontend Chat UI** (`frontend/src/app/chat/page.tsx`)
+- Sidebar with session list, new chat button, session delete
+- Chat area with message history, user/assistant/system message bubbles
+- Tool usage indicators showing which tools were called
+- Confirmation bar for write operations: shows pending changes with Approve/Cancel buttons
+- "Thinking..." indicator during API calls
+- Responsive layout (sidebar + chat split)
+- GARBE design system throughout
+
+**API Client** (`frontend/src/lib/api.ts`): Added `ChatSession`, `ChatMessageItem`, `PendingConfirmation`, `ChatResponse` interfaces and `listChatSessions()`, `getChatMessages()`, `deleteChatSession()`, `sendChatMessage()` functions.
+
+### Key technical decisions
+
+| Decision | Rationale |
+|---|---|
+| Synchronous (non-streaming) API | Simpler implementation; streaming can be added later. Tool loop completes server-side. |
+| Confirmation via `confirmed_tool_calls` IDs | Frontend holds pending IDs, re-sends them on confirm. Clean round-trip without server-side state. |
+| `claude-sonnet-4-6` model | Fast enough for interactive use; cheaper than Opus for high-volume chat |
+| Separate `chat_tools.py` from `chat.py` | Tool definitions and executors are testable independently without mocking the Claude API |
+| Max 10 tool iterations per request | Prevents runaway loops while allowing multi-step reasoning |
+
+### Test coverage
+
+24 new tests in `test_chat.py`:
+- **Tool execution (16 tests)**: Tool definitions valid, query_raw_data (basic + filter + no upload), portfolio_summary, search_tenants (canonical + alias), list_properties, list_inconsistencies, update_tenant (success + not found), update_property (success + invalid field), update_fund_mapping, resolve_inconsistency, unknown tool
+- **API endpoints (8 tests)**: Session create (mocked Claude), read tool executed, write tool needs confirmation, confirmed write executes, session continuity, session list/delete, session not found, chat session not found
+
+Full suite: **216 tests passing** in ~21s, no regressions.
+
+### Files changed
+
+| File | Action |
+|---|---|
+| `backend/app/core/chat_tools.py` | Created — 11 tool definitions + executors |
+| `backend/app/api/chat.py` | Created — chat API with Claude integration |
+| `backend/tests/test_chat.py` | Created — 24 tests |
+| `backend/app/main.py` | Modified — registered chat router |
+| `backend/requirements.txt` | Modified — added anthropic==0.52.0 |
+| `frontend/src/app/chat/page.tsx` | Created — chat UI with confirmation workflow |
+| `frontend/src/app/layout.tsx` | Modified — added Chat nav link |
+| `frontend/src/lib/api.ts` | Modified — chat API types and functions |
+
+### Deferred
+
+- Streaming responses (SSE) for real-time token display
+- "Ask the chatbot" button on inconsistency page (pre-fill context)
+- Chat message search / export
+- Rate limiting on write operations
+- Context window management for long conversations
+
+---
+
+## Phase 8: Reporting & Slides
+
+**Status:** Complete  
+**Date:** 2026-04-26
+
+### What was built
+
+**PPTX Slide Generation Engine** (`backend/app/core/slides.py`)
+- GARBE-branded presentations with custom colors (GARBE_BLAU, GARBE_GRUN, GARBE_OCKER, GARBE_ROT, GARBE_TURKIS)
+- Helper functions: `_new_pres()`, `_add_title_slide()`, `_add_content_slide()`, `_add_kpi_box()`, `_add_table()`, `_chart_to_image()` (matplotlib pie charts), `_add_bar_chart()` (pptx native charts)
+- **`generate_property_factsheet(db, upload_id, property_id)`**: 2-3 slide factsheet with KPI boxes (area, rent, vacancy, WAULT, tenants), pie chart (area by unit type via matplotlib), top tenants table
+- **`generate_portfolio_overview(db, upload_id)`**: Multi-slide overview with portfolio KPIs, fund rent breakdown (native bar chart), top 10 tenants by rent (native bar chart), full property summary table
+- **`generate_lease_expiry_profile(db, upload_id)`**: Lease expiry waterfall chart (native column chart) bucketed by year, plus summary table
+- **`generate_fund_summary(db, upload_id, fund_name)`**: Fund-level KPIs with property summary table
+
+**Reports API** (`backend/app/api/reports.py`)
+- `GET /api/reports/property-factsheet?upload_id=&property_id=` — StreamingResponse PPTX download
+- `GET /api/reports/portfolio-overview?upload_id=` — StreamingResponse PPTX download
+- `GET /api/reports/lease-expiry?upload_id=` — StreamingResponse PPTX download
+- `GET /api/reports/fund-summary?upload_id=&fund=` — StreamingResponse PPTX download
+- `GET /api/reports/available-funds?upload_id=` — list distinct funds for picker
+- `GET /api/reports/available-properties?upload_id=` — list distinct property IDs for picker
+- All endpoints validate upload exists and is "complete"; property/fund endpoints return 404 if no matching data
+
+**Frontend Reports Page** (`frontend/src/app/reports/page.tsx`)
+- Upload selector (filters to complete uploads)
+- Portfolio Reports section: Portfolio Overview and Lease Expiry Profile download cards
+- Fund Summary section: fund dropdown selector + download button
+- Property Factsheet section: property dropdown selector + download button
+- Downloads open in new tab (browser handles PPTX download via Content-Disposition)
+- Auto-loads available funds and properties when upload changes
+
+**API Client** (`frontend/src/lib/api.ts`): Added `getAvailableFunds()`, `getAvailableProperties()`, `getPropertyFactsheetUrl()`, `getPortfolioOverviewUrl()`, `getLeaseExpiryUrl()`, `getFundSummaryUrl()` functions.
+
+### Key technical decisions
+
+| Decision | Rationale |
+|---|---|
+| python-pptx native charts for bar/column charts | matplotlib 3.10.3 has infinite recursion bug (`copy.deepcopy` in `Path.__deepcopy__`) on Python 3.14 for bar/barh charts |
+| matplotlib only for pie charts | Pie charts work fine on Python 3.14; matplotlib pie → image → slide is simpler than pptx native pie |
+| `_add_bar_chart()` using `XL_CHART_TYPE.BAR_CLUSTERED` / `COLUMN_CLUSTERED` | Reliable across Python versions, rendered natively by PowerPoint |
+| Lazy imports in API endpoints (`from app.core.slides import ...`) | Avoids importing matplotlib at module load time; reduces startup cost for non-report requests |
+
+### Bug fixes
+
+| Bug | Root cause | Fix |
+|---|---|---|
+| `RecursionError` in matplotlib bar/barh charts | Python 3.14 `copy.deepcopy` incompatibility in matplotlib 3.10.3 `MarkerStyle._set_marker` → `Path.__deepcopy__` | Replaced matplotlib bar charts with python-pptx native charts (`_add_bar_chart()` helper) |
+
+### Test coverage
+
+10 new tests in `test_reports.py`:
+- Property factsheet: generates valid PPTX (2+ slides), 404 for missing property, content verification (property_id + city in slide text)
+- Portfolio overview: generates valid PPTX (3+ slides)
+- Lease expiry profile: generates valid PPTX (2+ slides)
+- Fund summary: generates valid PPTX (2+ slides), 404 for missing fund
+- Available funds/properties: returns correct distinct values
+- Upload not found: 404
+
+Full suite: **226 tests passing** in ~21s, no regressions.
+
+### Files changed
+
+| File | Action |
+|---|---|
+| `backend/app/core/slides.py` | Created — PPTX generation engine with 4 report types |
+| `backend/app/api/reports.py` | Created — 6 report API endpoints |
+| `backend/tests/test_reports.py` | Created — 10 tests |
+| `backend/app/main.py` | Modified — registered reports router |
+| `backend/requirements.txt` | Modified — added python-pptx==1.0.2, matplotlib==3.10.3 |
+| `frontend/src/app/reports/page.tsx` | Created — reports download UI |
+| `frontend/src/app/layout.tsx` | Modified — added Reports nav link |
+| `frontend/src/lib/api.ts` | Modified — report API URL builders and fetch functions |
+
+### Deferred
+
+- Custom slide templates (user-uploadable .pptx template files)
+- PDF export alternative to PPTX
+- Comparison reports (two periods side by side)
+- Chart color customization per fund/property
+- Batch report generation (all properties at once)

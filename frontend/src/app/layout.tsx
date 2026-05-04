@@ -67,6 +67,24 @@ export default function RootLayout({
                 >
                   Periods
                 </Link>
+                <Link
+                  href="/analytics"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Analytics
+                </Link>
+                <Link
+                  href="/reports"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Reports
+                </Link>
+                <Link
+                  href="/chat"
+                  className="text-garbe-blau-20 hover:text-white transition-colors"
+                >
+                  Chat
+                </Link>
               </div>
             </div>
           </div>
