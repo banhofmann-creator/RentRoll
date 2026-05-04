@@ -866,3 +866,26 @@ Validation run:
 | `tmp_path` pytest fixture fails on Windows | Every phase with filesystem tests | Use custom fixture with `tempfile.mkdtemp()` or project-local `.tmp_*` dir |
 | Self-reports wrong test counts in Review.md | 2/4 phases | Always verify with actual `pytest` run and correct |
 | Uses sample CSV data in tests instead of synthetic | First attempt on 2 phases | Explicitly say "create synthetic test data, do NOT use sample files" |
+
+---
+
+## 2026-05-04 Frontend Hotfix: Data Page Header Keys
+
+**Status:** Complete  
+**Date:** 2026-05-04
+
+### What changed
+
+- Fixed the React duplicate-key warning in `frontend/src/app/data/page.tsx` caused by rendering two table headers with the same `"Type"` key.
+- Changed the header mapping to use `key={`${h}-${index}`}` so duplicate labels no longer collide.
+- Simplified the row-loading logic by inlining the async fetch inside the `useEffect`, removing the extra `useCallback` wrapper.
+
+### Why this was needed
+
+- The data browser renders two columns labeled `"Type"` (row type and unit type), and the previous `key={h}` implementation produced non-unique React keys.
+- ESLint also flagged the previous `useEffect(() => loadRows(), [loadRows])` pattern in this file with `react-hooks/set-state-in-effect`.
+
+### Verification
+
+- `cmd /c npx eslint src/app/data/page.tsx` â†’ passed
+- Full frontend lint was not used for verification because the current repo-level ESLint run hits an unrelated permission error while scanning `frontend/.pytest_cache`.

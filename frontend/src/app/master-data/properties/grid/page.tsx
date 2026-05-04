@@ -3,16 +3,16 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
-import type { ColDef, ColGroupDef, CellValueChangedEvent } from "ag-grid-community";
+import { ModuleRegistry, AllCommunityModule, type ColDef, type ColGroupDef, type CellValueChangedEvent } from "ag-grid-community";
 
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
 
 import {
   type PropertyMaster,
   listProperties,
   updateProperty,
 } from "@/lib/api";
+
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 export default function PropertyGridPage() {
   const [rows, setRows] = useState<PropertyMaster[]>([]);

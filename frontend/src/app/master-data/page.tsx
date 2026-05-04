@@ -697,10 +697,9 @@ function TenantsTab() {
             </tr>
           </thead>
           <tbody className="divide-y divide-garbe-neutral">
-            {tenants.map((t, i) => (
-              <>
+            {tenants.flatMap((t, i) => [
                 <tr
-                  key={t.id}
+                  key={`tenant-${t.id}`}
                   className={`hover:bg-garbe-neutral/50 cursor-pointer ${
                     i % 2 === 1 ? "bg-garbe-offwhite" : ""
                   }`}
@@ -733,9 +732,9 @@ function TenantsTab() {
                       onClick={() => handleDelete(t.id)}
                     />
                   </td>
-                </tr>
-                {expandedId === t.id && (
-                  <tr key={`${t.id}-aliases`}>
+                </tr>,
+                ...(expandedId === t.id
+                  ? [<tr key={`tenant-aliases-${t.id}`}>
                     <td colSpan={5} className="px-6 py-3 bg-garbe-offwhite">
                       <div className="text-xs font-semibold text-garbe-blau uppercase tracking-wider mb-2">
                         Aliases
@@ -788,10 +787,9 @@ function TenantsTab() {
                         </button>
                       </div>
                     </td>
-                  </tr>
-                )}
-              </>
-            ))}
+                  </tr>]
+                  : []),
+            ])}
           </tbody>
         </table>
       </div>

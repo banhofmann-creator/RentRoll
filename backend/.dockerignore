@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+.tmp_pytest
+.tmp_export_tests
+test.db
+tests/
+uploads/
+.pytest_cache

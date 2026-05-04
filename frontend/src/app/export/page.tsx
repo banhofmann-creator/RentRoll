@@ -10,6 +10,7 @@ import {
   getExportChannels,
   investorPackUrl,
   listPeriods,
+  periodExportUrl,
   previewInvestorPack,
   pushToChannel,
 } from "@/lib/api";
@@ -140,7 +141,7 @@ export default function ExportPage() {
     <div className="max-w-6xl mx-auto px-6 py-10">
       <h1 className="text-2xl font-bold text-garbe-blau mb-2">Export</h1>
       <p className="text-garbe-grau mb-8">
-        Generate investor reporting packs, review their contents, and push them
+        Download BVI target tables, generate investor reporting packs, and push
         to configured output channels.
       </p>
 
@@ -160,12 +161,12 @@ export default function ExportPage() {
         <div className="space-y-8">
           <section className="rounded-xl border border-garbe-neutral bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-garbe-blau mb-4">
-              Pack Scope
+              Reporting Period
             </h2>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-garbe-grau mb-1">
-                  Reporting Period
+                  Period
                 </label>
                 <select
                   value={selectedPeriodId ?? ""}
@@ -199,8 +200,45 @@ export default function ExportPage() {
                 </select>
               </div>
             </div>
+          </section>
 
-            <div className="mt-6 flex flex-wrap gap-3">
+          <section className="rounded-xl border-2 border-garbe-grun bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-semibold text-garbe-blau">
+                BVI Target Table
+              </h2>
+              <span className="rounded-full bg-garbe-grun/10 px-3 py-1 text-xs font-semibold text-garbe-grun">
+                Z1 + G2
+              </span>
+            </div>
+            <p className="text-sm text-garbe-grau mb-4">
+              Download the BVI-compliant XLSX with Z1_Tenants_Leases and
+              G2_Property_data sheets for the selected period.
+            </p>
+            <a
+              href={selectedPeriodId ? periodExportUrl(selectedPeriodId) : "#"}
+              download
+              className={`inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-semibold text-white transition-colors ${
+                selectedPeriodId
+                  ? "bg-garbe-grun hover:bg-garbe-grun/90"
+                  : "bg-garbe-grau cursor-not-allowed pointer-events-none opacity-50"
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
+              </svg>
+              Download BVI XLSX
+            </a>
+          </section>
+
+          <section className="rounded-xl border border-garbe-neutral bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-garbe-blau mb-2">
+              Investor Reporting Pack
+            </h2>
+            <p className="text-sm text-garbe-grau mb-4">
+              ZIP bundle with BVI XLSX and PPTX slides.
+            </p>
+            <div className="flex flex-wrap gap-3">
               <button
                 onClick={handlePreview}
                 disabled={!selectedPeriodId || previewLoading}
@@ -211,7 +249,7 @@ export default function ExportPage() {
               <button
                 onClick={openDownload}
                 disabled={!selectedPeriodId}
-                className="rounded-md bg-garbe-grun px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-garbe-grun/90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md border border-garbe-blau px-4 py-2 text-sm font-medium text-garbe-blau transition-colors hover:bg-garbe-blau-5 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Download Pack
               </button>

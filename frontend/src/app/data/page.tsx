@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   type UploadDetail,
   type UploadListItem,
@@ -38,28 +38,30 @@ export default function DataPage() {
     listUploads().then(setUploads).catch(() => {});
   }, []);
 
-  const loadRows = useCallback(async () => {
-    if (!selectedUpload) return;
-    try {
-      const [d, r] = await Promise.all([
-        getUpload(selectedUpload),
-        getUploadRows(selectedUpload, {
-          row_type: rowTypeFilter || undefined,
-          offset,
-          limit,
-        }),
-      ]);
-      setDetail(d);
-      setRows(r.rows);
-      setTotal(r.total);
-    } catch {
-      // ignore
-    }
-  }, [selectedUpload, offset, rowTypeFilter]);
-
   useEffect(() => {
-    loadRows();
-  }, [loadRows]);
+    if (!selectedUpload) return;
+    const uploadId = selectedUpload;
+
+    async function fetchRows() {
+      try {
+        const [d, r] = await Promise.all([
+          getUpload(uploadId),
+          getUploadRows(uploadId, {
+            row_type: rowTypeFilter || undefined,
+            offset,
+            limit,
+          }),
+        ]);
+        setDetail(d);
+        setRows(r.rows);
+        setTotal(r.total);
+      } catch {
+        // ignore
+      }
+    }
+
+    void fetchRows();
+  }, [selectedUpload, offset, rowTypeFilter]);
 
   const completedUploads = uploads.filter((u) => u.status === "complete");
 
@@ -144,9 +146,9 @@ export default function DataPage() {
                         "Tenant",
                         "Area (m²)",
                         "Annual Rent",
-                      ].map((h) => (
+                      ].map((h, index) => (
                         <th
-                          key={h}
+                          key={`${h}-${index}`}
                           className="px-3 py-2 text-left text-xs font-semibold text-garbe-blau uppercase tracking-wider whitespace-nowrap"
                         >
                           {h}
