@@ -739,6 +739,79 @@ export function periodExportUrl(periodId: number): string {
   return `${API_BASE}/api/periods/${periodId}/export`;
 }
 
+// --- PPTX Refresh ---
+
+export interface PptxTokenProposal {
+  address?: Record<string, unknown>;
+  kpi_id?: string;
+  full_text?: string;
+  span?: number[];
+}
+
+export interface PptxRefreshJob {
+  id: number;
+  status: string;
+  original_filename: string;
+  output_filename?: string | null;
+  error_message?: string | null;
+  proposals?: {
+    tokens: Array<string | PptxTokenProposal>;
+    unknown_tokens: string[];
+  };
+  proposals_json?: {
+    mode?: string;
+    tokens?: PptxTokenProposal[];
+    unknown_tokens?: string[];
+  } | null;
+  confirmed_json?: unknown;
+  period_status_at_refresh?: string | null;
+}
+
+export async function uploadPptxRefresh(
+  file: File
+): Promise<PptxRefreshJob> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE}/api/pptx/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Upload failed" }));
+    throw new Error(err.detail || "Upload failed");
+  }
+  return res.json();
+}
+
+export async function getPptxRefreshJob(
+  id: number
+): Promise<PptxRefreshJob> {
+  const res = await fetch(`${API_BASE}/api/pptx/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch PPTX refresh job");
+  return res.json();
+}
+
+export async function applyPptxRefresh(
+  id: number,
+  periodId: number
+): Promise<PptxRefreshJob> {
+  const res = await fetch(`${API_BASE}/api/pptx/${id}/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ period_id: periodId, mappings: null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Apply failed" }));
+    throw new Error(err.detail || "Apply failed");
+  }
+  return res.json();
+}
+
+export function pptxRefreshDownloadUrl(id: number): string {
+  return `${API_BASE}/api/pptx/${id}/download`;
+}
+
 // --- Export ---
 
 export interface ChannelInfo {

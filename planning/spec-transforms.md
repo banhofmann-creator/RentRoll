@@ -45,16 +45,21 @@ FOR EACH (fund, property_id) WHERE row_type = 'data':
   — Rent by use type (cols 51–65) —
   → CONTRACTUAL_RENT = SUM(annual_net_rent) across all units
   → rent_per_sqm = CONTRACTUAL_RENT / RENTABLE_AREA
-  → For each unit_type: SUM(annual_net_rent) → targeted rent column
+  → targeted_per_unit = annual_net_rent if tenant != 'LEERSTAND'
+                        else COALESCE_POSITIVE(erv_monthly × 12,
+                                               market_rent_monthly × 12,
+                                               annual_net_rent)
+  → GROSS_POTENTIAL_INCOME = SUM(targeted_per_unit)
+  → For each unit_type: SUM(targeted_per_unit) → targeted rent column
 
   — ERV by use type (cols 66–77) —
   → For each unit_type: SUM(erv_monthly) × 12
 
   — Let rent (cols 78–88) —
-  → Same as rent by type, filtered to tenant != 'LEERSTAND'
+  → For each unit_type: SUM(annual_net_rent) WHERE tenant != 'LEERSTAND'
 
   — Vacant rent (cols 89–99) —
-  → For LEERSTAND units: SUM(market_rent_monthly) × 12, grouped by unit_type
+  → For each unit_type: SUM(targeted_per_unit) WHERE tenant = 'LEERSTAND'
 
   — Lease expiry schedule (cols 100–112) —
   → For each non-LEERSTAND unit with lease_end_actual:

@@ -257,23 +257,32 @@ The sample G2 sheet contains 71 properties with actual data across 4 fund IDs (`
 
 #### G2 Columns: Contract & Targeted Rent (cols 51–65)
 
+**Targeted net rent per unit** is defined as:
+- **Let (occupied) unit**: contract rent (`annual_net_rent col[30]`).
+- **Vacant unit (`LEERSTAND`)**: imputed using the fallback chain
+  1. AM-ERV (`erv_monthly col[36]` × 12) if > 0
+  2. else Market rent (`market_rent_monthly col[35]` × 12) if > 0
+  3. else fall back to the unit's contract rent (`col[30]`, typically 0 for vacancy)
+
 | Col | BVI Field | Label | Source | Derivation |
 |---|---|---|---|---|
 | 51 | CONTRACTUAL_RENT | Contract rent | **Aggregation** | SUM(`annual_net_rent col[30]`) across all units in property |
 | 52 | *(no BVI code)* | rent / sqm | **Derivable** | CONTRACTUAL_RENT / RENTABLE_AREA |
-| 53 | GROSS_POTENTIAL_INCOME | Targeted net rent | **Aggregation** | SUM(`annual_net_rent col[30]`) — same as col 51 for fully let properties; for vacant units use market rent |
-| 54 | GROSS_POTENTIAL_INCOME_OFFICE | Targeted net rent: Office | **Aggregation** | SUM annual rent WHERE `Art` = `Büro` |
-| 55 | *(no BVI code)* | Targeted net rent: Mezzanine | **Aggregation** | SUM annual rent WHERE `Art` = `Empore/Mezzanine` |
-| 56 | *(no BVI code)* | Targeted net rent: Industrial, outdoor | **Aggregation** | (combined industrial sub-type) |
-| 57 | GROSS_POTENTIAL_INCOME_INDUSTRY | Targeted net rent: Industrial (storage, warehouses) | **Aggregation** | SUM annual rent WHERE `Art` = `Halle` |
-| 58 | *(no BVI code)* | Targeted net rent: Freifläche | **Aggregation** | SUM annual rent WHERE `Art` = `Freifläche` |
-| 59 | GROSS_POTENTIAL_INCOME_HOTEL | Targeted net rent: gastronomy | **Aggregation** | SUM annual rent WHERE `Art` = `Gastronomie` |
-| 60 | GROSS_POTENTIAL_INCOME_LEISURE | Targeted net rent: Retail | **Aggregation** | SUM annual rent WHERE `Art` = `Einzelhandel` |
-| 61 | *(no BVI code)* | Targeted net rent: Hotel | **Aggregation** | SUM annual rent WHERE `Art` = `Hotel` |
-| 62 | *(no BVI code)* | Targeted net rent: Rampe | **Aggregation** | SUM annual rent WHERE `Art` = `Rampe` |
-| 63 | *(no BVI code)* | Targeted net rent: Residential | **Aggregation** | SUM annual rent WHERE `Art` = `Wohnen` |
-| 64 | GROSS_POTENTIAL_INCOME_PARKING | Targeted net rent: Parking | **Aggregation** | SUM annual rent WHERE `Art` = `Stellplätze` |
-| 65 | GROSS_POTENTIAL_INCOME_OTHER | Targeted net rent: Other | **Aggregation** | SUM annual rent WHERE `Art` = `Sonstige` |
+| 53 | GROSS_POTENTIAL_INCOME | Targeted net rent | **Aggregation** | SUM of targeted net rent per unit (see definition above) across all units |
+| 54 | GROSS_POTENTIAL_INCOME_OFFICE | Targeted net rent: Office | **Aggregation** | SUM targeted net rent WHERE `Art` = `Büro` |
+| 55 | *(no BVI code)* | Targeted net rent: Mezzanine | **Aggregation** | SUM targeted net rent WHERE `Art` = `Empore/Mezzanine` |
+| 56 | *(no BVI code)* | Targeted net rent: Industrial, outdoor | **Aggregation** | SUM targeted net rent WHERE `Art` ∈ {`Halle`, `Freifläche`} |
+| 57 | GROSS_POTENTIAL_INCOME_INDUSTRY | Targeted net rent: Industrial (storage, warehouses) | **Aggregation** | SUM targeted net rent WHERE `Art` = `Halle` |
+| 58 | *(no BVI code)* | Targeted net rent: Freifläche | **Aggregation** | SUM targeted net rent WHERE `Art` = `Freifläche` |
+| 59 | GROSS_POTENTIAL_INCOME_HOTEL | Targeted net rent: gastronomy | **Aggregation** | SUM targeted net rent WHERE `Art` = `Gastronomie` |
+| 60 | GROSS_POTENTIAL_INCOME_LEISURE | Targeted net rent: Retail | **Aggregation** | SUM targeted net rent WHERE `Art` = `Einzelhandel` |
+| 61 | *(no BVI code)* | Targeted net rent: Hotel | **Aggregation** | SUM targeted net rent WHERE `Art` = `Hotel` |
+| 62 | *(no BVI code)* | Targeted net rent: Rampe | **Aggregation** | SUM targeted net rent WHERE `Art` = `Rampe` |
+| 63 | *(no BVI code)* | Targeted net rent: Residential | **Aggregation** | SUM targeted net rent WHERE `Art` = `Wohnen` |
+| 64 | GROSS_POTENTIAL_INCOME_PARKING | Targeted net rent: Parking | **Aggregation** | SUM targeted net rent WHERE `Art` = `Stellplätze` |
+| 65 | GROSS_POTENTIAL_INCOME_OTHER | Targeted net rent: Other | **Aggregation** | SUM targeted net rent WHERE `Art` = `Sonstige` |
+
+For each use type, col 54–65 = (col 78–88: let portion) + (col 89–99: vacant portion).
 
 #### G2 Columns: AM-ERV by Use Type (cols 66–77)
 
@@ -295,7 +304,7 @@ Same use-type breakdown as cols 54–65, but **only for let units** (tenant_name
 
 #### G2 Columns: Targeted Net Rent — Vacant (cols 89–99)
 
-Same use-type breakdown, but **only for vacant units** (tenant_name = `LEERSTAND`). Uses market rent (`col[35]` × 12) for vacant units.
+Same use-type breakdown, but **only for vacant units** (tenant_name = `LEERSTAND`). Each vacant unit contributes its imputed targeted net rent via the fallback chain AM-ERV → Market rent → contract rent (see col 53 definition above).
 
 | Col | BVI Field | Label |
 |---|---|---|

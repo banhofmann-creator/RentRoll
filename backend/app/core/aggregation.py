@@ -491,21 +491,13 @@ def aggregate_g2(
 
             g2.contractual_rent += rent
 
-            rent_attr = _RENT_ATTR.get(ut)
-            if rent_attr:
-                setattr(g2, rent_attr, getattr(g2, rent_attr) + rent)
-
-            if ut == "Halle":
-                g2.rent_industrial_outdoor += rent
-            elif ut == "Freifläche":
-                g2.rent_industrial_outdoor += rent
-
             erv_attr = _ERV_ATTR.get(ut)
             if erv_attr:
                 setattr(g2, erv_attr, getattr(g2, erv_attr) + erv)
             g2.erv_total += erv
 
             if not is_leerstand:
+                targeted = rent
                 let_attr = _LET_RENT_ATTR.get(ut)
                 if let_attr:
                     setattr(g2, let_attr, getattr(g2, let_attr) + rent)
@@ -514,9 +506,26 @@ def aggregate_g2(
                 if bucket:
                     lease_buckets[bucket] += rent
             else:
+                if erv > 0:
+                    targeted = erv
+                elif market_rent > 0:
+                    targeted = market_rent
+                else:
+                    targeted = rent
                 vacant_attr = _VACANT_RENT_ATTR.get(ut)
                 if vacant_attr:
-                    setattr(g2, vacant_attr, getattr(g2, vacant_attr) + market_rent)
+                    setattr(g2, vacant_attr, getattr(g2, vacant_attr) + targeted)
+
+            g2.gross_potential_income += targeted
+
+            rent_attr = _RENT_ATTR.get(ut)
+            if rent_attr:
+                setattr(g2, rent_attr, getattr(g2, rent_attr) + targeted)
+
+            if ut == "Halle":
+                g2.rent_industrial_outdoor += targeted
+            elif ut == "Freifläche":
+                g2.rent_industrial_outdoor += targeted
 
         g2.tenant_count = len(tenants)
         g2.tenant_count_2 = g2.tenant_count
@@ -524,11 +533,6 @@ def aggregate_g2(
 
         if g2.rentable_area > 0:
             g2.rent_per_sqm = g2.contractual_rent / g2.rentable_area
-
-        total_vacant_rent = sum(
-            getattr(g2, a) for a in _VACANT_RENT_ATTR.values()
-        )
-        g2.gross_potential_income = g2.contractual_rent + total_vacant_rent
 
         if summary:
             g2.market_rental_value = _dec(summary.market_rent_monthly) * 12

@@ -1,0 +1,177 @@
+Implement Phase A of Jira ticket RR-1 for the RentRoll project. RR-1 introduces an AI-driven slide deck refresh feature; Phase A ships the deterministic infrastructure (ingest + KPI catalog + token-mode patcher + API + data model + tests + frontend), with NO AI integration. Phase B (Claude resolver) is a SEPARATE later prompt — do not implement it now.
+
+Read CLAUDE.md, planning/PLAN.md, and the RR-1 plan in planning/Review.md for context. The full plan and design decisions DD-1 through DD-4 live in the Jira ticket description (https://banhofmann.atlassian.net/browse/RR-1) — paraphrased below where relevant.
+
+Existing infrastructure you MUST reuse, not duplicate:
+- python-pptx 1.0.2 (already in requirements.txt; backend/app/core/slides.py uses it)
+- SQLAlchemy ORM with Base class in backend/app/models/database.py (no Alembic — schema is created via Base.metadata.create_all)
+- FastAPI BackgroundTasks pattern from backend/app/api/upload.py
+- Reporting periods + KPI queries: backend/app/api/analytics.py exposes _csv_kpis(db, upload_id) and _snapshot_kpis(db, period_id) returning dicts with keys: total_rent, total_area, vacant_area, vacancy_rate, tenant_count, property_count, fair_value, total_debt, wault_avg
+- Output channel registry: backend/app/channels/registry.py (Phase 9). A refreshed deck wraps as ExportFile and pushes through the existing registry — but Phase A only needs direct download; channel push integration is Phase C.
+- Frontend page pattern: frontend/src/app/upload/page.tsx (drag-drop + status polling) and frontend/src/app/export/page.tsx (period dropdown). Use GARBE design system (garbe-blau, garbe-grun, garbe-ocker).
+
+What to build (10 steps):
+
+Step 1 — Data model (backend/app/models/database.py)
+
+Add a new SQLAlchemy model class PptxRefreshJob using the same Base. Columns:
+- id (Integer, primary_key, autoincrement)
+- original_filename (String, not null)
+- original_blob_path (String, not null) — relative path under backend/uploads/pptx_refresh/{id}/source.pptx
+- reporting_period_id (Integer, ForeignKey('reporting_periods.id'), nullable=True initially — set when the user picks a period)
+- period_status_at_refresh (String, nullable=True) — snapshot of "draft" or "finalized" at apply time (per DD-4 audit)
+- status (String, not null, default='uploaded') — one of: uploaded | proposed | applying | complete | error
+- proposals_json (JSON / Text, nullable) — populated by Phase B
+- confirmed_json (JSON / Text, nullable) — list of {address, kpi_id, original_value, new_value} actually applied
+- output_filename (String, nullable)
+- output_blob_path (String, nullable) — relative path to the refreshed .pptx
+- error_message (Text, nullable)
+- created_at (DateTime, default=datetime.utcnow)
+- finalized_at (DateTime, nullable)
+- created_by (String, nullable) — user identity if available; pass None for now
+
+Use sqlalchemy.JSON column type (already used elsewhere in this file — e.g. crrem_floor_areas_json on PropertyMaster). For SQLite-compat use the same approach.
+
+Step 2 — KPI catalog (backend/app/core/kpi_catalog.py)
+
+Closed enumeration of KPIs supported by Phase A. Each KPI:
+- kpi_id (str, snake_case, e.g. "total_rent")
+- label (human-readable)
+- aliases (list[str]) — alternate German + English labels Phase B will match against
+- scope ("portfolio" | "fund" | "property")
+- format_hint (str) — one of: "money_eur_millions", "money_eur", "area_sqm", "percent", "integer", "years_decimal"
+- source_key (str) — corresponding key in analytics._snapshot_kpis() / _csv_kpis() return dict
+
+For Phase A include exactly the keys returned by _snapshot_kpis(): total_rent, total_area, vacant_area, vacancy_rate, tenant_count, property_count, fair_value, total_debt, wault_avg. All scope="portfolio" since these are portfolio-wide. (Fund/property scoped KPIs come in Phase B/C — leave the scope field generic but only emit portfolio entries.)
+
+Provide:
+- KPI_CATALOG: dict[str, KpiSpec] keyed by kpi_id
+- get_kpi(kpi_id) -> KpiSpec | None
+- format_value(value: float | int, format_hint: str, locale: str = "de_DE") -> str — renders 12500000 as "12,5 M€" for money_eur_millions, "12.500.000 €" for money_eur, "5,32 %" for percent etc. Default to German locale (this is a German real-estate product). DO NOT use the babel library; do simple string formatting with manual decimal-comma swap.
+- resolve_kpi_value(db, kpi_id, period_id) -> float | int | None — calls _snapshot_kpis() (or _csv_kpis() if no snapshot yet) and returns the raw value for that kpi_id.
+
+Step 3 — PPTX ingestor (backend/app/parsers/pptx_ingestor.py)
+
+Function ingest_pptx(file_bytes: bytes) -> list[TextElement] where TextElement is a dataclass with:
+- address: tuple capturing (slide_idx: int, shape_id: int, kind: "text_frame" | "table_cell", row: int | None, col: int | None, paragraph_idx: int, run_idx: int)
+- text: str — the run-level text
+- font_name, font_size_pt, font_bold, font_color_rgb (best-effort copies of run formatting; None where not set)
+
+Walk all slides; for each shape with .has_text_frame, iterate paragraphs and runs. For shapes with .has_table, iterate cells, then text_frames inside cells, then paragraphs and runs. Skip charts, pictures, group shapes (group shape recursion can be Phase C).
+
+Also expose find_token_candidates(elements: list[TextElement]) -> list[TokenCandidate] where TokenCandidate is (address, kpi_id, full_text, span: tuple[int, int]). Tokens are literal {{kpi_id}} substrings; kpi_id must be a key in KPI_CATALOG, otherwise the candidate is dropped (return as a separate list[str] of unknown tokens for the caller to surface).
+
+Step 4 — PPTX patcher (backend/app/core/pptx_patcher.py)
+
+Function apply_token_mappings(file_bytes: bytes, mappings: list[Mapping]) -> tuple[bytes, list[AppliedChange]] where Mapping is (address, original_value, new_value: str). The patcher:
+- Reopens the .pptx (via python-pptx Presentation(io.BytesIO(file_bytes)))
+- For each mapping, locates the run by address; replaces the {{token}} substring within that run's .text. Preserves font properties because we only touch .text, not the run-level formatting.
+- Returns (new_bytes, [AppliedChange(address, original_value, new_value, success: bool, reason: str | None)])
+
+If a token spans multiple runs (sometimes a single visible {{total_rent}} is split into runs ["{{", "total_rent", "}}"]), document the v1 strategy: detect the split at ingest time, rewrite at the paragraph level using the first run's font properties, drop the others. Add a TODO referencing this and ship the simple "single-run" path first; multi-run can be Phase C if it shows up in tests.
+
+Step 5 — API router (backend/app/api/pptx_refresh.py)
+
+FastAPI router prefix="/pptx", tags=["pptx"]. Endpoints:
+
+- POST /api/pptx/upload (multipart .pptx file) → creates PptxRefreshJob with status='uploaded', persists original to backend/uploads/pptx_refresh/{id}/source.pptx, runs ingest in a BackgroundTask to detect token candidates and unknown tokens, stores them in proposals_json as {"mode": "token", "tokens": [...], "unknown_tokens": [...]}, sets status to 'proposed'. Returns {id, status}.
+- GET /api/pptx/{id} → returns full job record including proposals_json and confirmed_json.
+- POST /api/pptx/{id}/apply (body: {period_id: int, mappings: list[{address, kpi_id}] | None}) → If mappings is None, auto-apply all token candidates from proposals_json. Otherwise apply only the listed mappings. Look up each kpi value via resolve_kpi_value(), format via format_value(), pass to apply_token_mappings(). Persist refreshed deck to backend/uploads/pptx_refresh/{id}/refreshed.pptx, set status='complete', confirmed_json populated, output_filename = "<original-stem>-refreshed.pptx", period_status_at_refresh = the period's status string. On any error set status='error', error_message.
+- GET /api/pptx/{id}/download → streams the refreshed .pptx as application/vnd.openxmlformats-officedocument.presentationml.presentation with the output_filename in Content-Disposition.
+
+Background task pattern: copy the structure of _process_upload() in backend/app/api/upload.py — set_session_factory(), in-process SessionLocal access, error trap that writes status='error' + error_message.
+
+Mount the new router in backend/app/main.py following the existing pattern (line 53 area).
+
+Step 6 — Frontend API client (frontend/src/lib/api.ts)
+
+Add interfaces and functions:
+- PptxRefreshJob: {id, status, original_filename, output_filename?, error_message?, proposals?: {tokens: string[], unknown_tokens: string[]}, period_status_at_refresh?: string}
+- uploadPptxRefresh(file: File): Promise<PptxRefreshJob>
+- getPptxRefreshJob(id: number): Promise<PptxRefreshJob>
+- applyPptxRefresh(id: number, periodId: number): Promise<PptxRefreshJob>
+- pptxRefreshDownloadUrl(id: number): string
+
+Step 7 — Frontend page (frontend/src/app/decks/page.tsx)
+
+Page layout:
+- Header: "Slide Deck Refresh" with GARBE styling
+- Upload section: drag-drop zone (reuse styles from upload/page.tsx). On drop, call uploadPptxRefresh, poll getPptxRefreshJob every 1s until status != 'uploaded'.
+- Once status='proposed': show the list of detected tokens + any unknown_tokens with a warning. Period dropdown (fetch from GET /api/periods). When user selects a period and clicks "Refresh deck", call applyPptxRefresh.
+  - If the selected period has status='draft', show the DD-4 banner above the Refresh button: "⚠️ Period not finalized — values may change before close-out. Do not distribute this deck to investors." in GARBE warning style.
+- Once status='complete': show download link to pptxRefreshDownloadUrl(id). If period_status_at_refresh='draft', show a smaller persistent banner on the result.
+- On status='error': show error_message in red.
+
+Add nav link "Decks" to frontend/src/app/layout.tsx after Reports and before Chat (or wherever Export sits — keep ordering tidy).
+
+Step 8 — Tests (backend/tests/test_pptx_refresh.py)
+
+Use existing conftest.py fixtures (db, client, sample_csv_bytes if needed). Create synthetic .pptx fixtures programmatically with python-pptx — DO NOT commit binary fixture files. Provide a helper _make_synthetic_deck(tokens: list[str]) -> bytes that builds a Presentation with one slide containing each token in a text_frame and one in a table cell, returns the bytes.
+
+Tests required:
+- test_kpi_catalog_has_all_snapshot_keys — every key in _snapshot_kpis() return value has a KPI_CATALOG entry.
+- test_format_value_money_eur_millions — formats 12_500_000 as "12,5 M€".
+- test_format_value_percent — formats 0.0532 as "5,32 %".
+- test_format_value_integer — formats 17 as "17".
+- test_ingest_finds_text_frame_tokens — synthetic deck with {{total_rent}} returns one TokenCandidate at address.kind='text_frame'.
+- test_ingest_finds_table_cell_tokens — synthetic deck with {{total_area}} inside a 2x2 table returns one TokenCandidate at address.kind='table_cell' with row+col set.
+- test_ingest_unknown_token — {{not_a_kpi}} ends up in unknown_tokens, not tokens.
+- test_patcher_replaces_token_in_text_frame — apply_token_mappings replaces {{total_rent}} with "12,5 M€" in-place.
+- test_patcher_replaces_token_in_table_cell — same in a table cell.
+- test_patcher_preserves_other_text — surrounding text stays intact.
+- test_api_upload_and_status_flow — POST /api/pptx/upload returns job id, polling GET /api/pptx/{id} eventually returns status='proposed' with token list.
+- test_api_apply_complete — POST /api/pptx/{id}/apply with a valid period_id returns status='complete' and output_filename, file exists on disk.
+- test_api_apply_records_period_status_for_draft — when the period is draft, period_status_at_refresh='draft' is stored.
+- test_api_apply_unknown_kpi_returns_error — proposals_json is fine but apply with an empty period DB returns status='error' with explanatory error_message (or skip this if the API design auto-passes through).
+- test_api_download_returns_pptx — GET /api/pptx/{id}/download returns 200 with correct content-type after a successful apply.
+
+Use tempfile / project-local .tmp_pytest dirs for blob storage in tests if upload paths are touched (matches existing test_upload.py pattern). Make sure to teardown.
+
+Step 9 — Smoke check
+
+After implementation, run: cd backend && python -m pytest --tb=short -q. ALL existing tests (currently 243 passing) must still pass. Report the new total. If any test fails, fix it before declaring done.
+
+Step 10 — Update planning/Review.md
+
+Append a new section "## 2026-05-04 RR-1 Phase A: PPTX Refresh — token-mode infrastructure" with subsections matching the existing Review.md format:
+- Status: Complete (Phase A)
+- Date: 2026-05-04
+- What was built (file inventory)
+- Test coverage (count + what's covered)
+- Files changed
+- Deferred items (Phase B AI resolver, Phase C charts/multi-run/output-channel push)
+- Reference RR-1 ticket URL
+
+Constraints:
+- Python 3.14. python-pptx 1.0.2, anthropic 0.52.0 (do not use anthropic in Phase A — that's Phase B). No new pip deps.
+- SQLite for tests, PostgreSQL prod. SQLAlchemy ORM only, no raw SQL.
+- Tests must pass with cd backend && pytest. Existing 243 must still pass.
+- Do NOT modify existing test files or conftest.py.
+- Do NOT touch the LLM/chat path; do not import anthropic anywhere in Phase A.
+- DD-1: Apply step is synchronous and explicit — no auto-apply on upload, even though token mode could technically run without confirmation. The user must POST /apply to trigger writes. (Future: a `--auto` toggle when Phase B lands.)
+- DD-3: KPI catalog is exactly _snapshot_kpis() keys for v1. Out-of-catalog tokens go in unknown_tokens, never silently mapped.
+- DD-4: Banner copy lives in the frontend; backend just records period_status_at_refresh.
+- Windows: avoid hard-coded path separators. Use pathlib. Tests should use tempfile.mkdtemp() not pytest's tmp_path (per existing project convention noted in Review.md "Codex Workflow Lessons Learned").
+
+Out of scope for Phase A (Phase B / C):
+- Anthropic Claude integration, scan endpoint, AI proposal review screen
+- Run-boundary token splitting beyond a TODO note
+- Chart data refresh
+- Output channel push integration
+- Bulk endpoint
+- Comparison slides / multi-period support
+
+Deliverables checklist:
+- [ ] PptxRefreshJob model
+- [ ] kpi_catalog.py with KPI_CATALOG, get_kpi, format_value, resolve_kpi_value
+- [ ] pptx_ingestor.py with ingest_pptx, find_token_candidates
+- [ ] pptx_patcher.py with apply_token_mappings
+- [ ] pptx_refresh.py router with 4 endpoints, registered in main.py
+- [ ] decks/page.tsx with upload + period picker + draft banner + result download
+- [ ] api.ts updated with PPTX refresh client functions
+- [ ] layout.tsx nav link added
+- [ ] test_pptx_refresh.py with the listed test cases
+- [ ] All 243 existing tests still pass; new total reported
+- [ ] planning/Review.md entry appended
+
+End of Phase A prompt.

@@ -66,9 +66,21 @@ desktop.ini
 # Uploads (keep directory, ignore uploaded files)
 uploads/*
 !uploads/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Project-local test/runtime scratch directories
+backend/.tmp_*/
+backend/tmp*/
 
 # Generated exports
 exports/
+backend/exports/
+backend/exports_probe/
+
+# Local server logs
+backend/*.log
+frontend/*.log
 
 # Claude Code local settings
 .claude/

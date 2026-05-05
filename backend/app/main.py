@@ -13,6 +13,7 @@ from app.api.excel_roundtrip import router as excel_roundtrip_router
 from app.api.inconsistencies import router as inconsistency_router
 from app.api.master_data import router as master_data_router
 from app.api.periods import router as periods_router
+from app.api.pptx_refresh import router as pptx_refresh_router
 from app.api.transform import router as transform_router
 from app.api.upload import router as upload_router
 
@@ -51,6 +52,7 @@ app.include_router(analytics_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(reports_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
+app.include_router(pptx_refresh_router, prefix="/api")
 
 
 @app.get("/api/health")

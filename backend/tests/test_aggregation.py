@@ -310,7 +310,7 @@ def test_g2_parking_let_excludes_leerstand(db):
     assert rows[0].parking_let == 8
 
 
-def test_g2_gross_potential_income_includes_vacancy(db):
+def test_g2_gross_potential_income_vacant_uses_market_when_no_erv(db):
     upload = _make_upload(db)
     _add_data_row(db, upload.id, "GLIF", "7042", "T", "Halle", 5000, 120000)
     _add_data_row(db, upload.id, "GLIF", "7042", "LEERSTAND", "Büro", 500, 0, market_rent_monthly=3000)
@@ -319,6 +319,63 @@ def test_g2_gross_potential_income_includes_vacancy(db):
     g = rows[0]
     assert g.contractual_rent == 120000
     assert g.gross_potential_income == 120000 + 36000
+    assert g.vacant_rent_office == 36000
+    assert g.rent_office == 36000  # targeted = let (0) + vacant (36000)
+    assert g.let_rent_industrial == 120000
+
+
+def test_g2_gross_potential_income_vacant_prefers_erv_over_market(db):
+    upload = _make_upload(db)
+    _add_data_row(db, upload.id, "GLIF", "7042", "T", "Halle", 5000, 120000)
+    _add_data_row(
+        db, upload.id, "GLIF", "7042", "LEERSTAND", "Büro", 500, 0,
+        erv_monthly=3500, market_rent_monthly=3000,
+    )
+
+    rows = aggregate_g2(db, upload.id)
+    g = rows[0]
+    assert g.contractual_rent == 120000
+    assert g.vacant_rent_office == 42000
+    assert g.gross_potential_income == 120000 + 42000
+
+
+def test_g2_gross_potential_income_vacant_falls_back_to_contract(db):
+    upload = _make_upload(db)
+    _add_data_row(db, upload.id, "GLIF", "7042", "T", "Halle", 5000, 120000)
+    _add_data_row(db, upload.id, "GLIF", "7042", "LEERSTAND", "Büro", 500, 0)
+
+    rows = aggregate_g2(db, upload.id)
+    g = rows[0]
+    assert g.contractual_rent == 120000
+    assert g.vacant_rent_office == 0
+    assert g.gross_potential_income == 120000
+
+
+def test_g2_gross_potential_income_includes_unmapped_unit_type(db):
+    upload = _make_upload(db)
+    _add_data_row(db, upload.id, "GLIF", "7042", "Tenant A", "Halle", 5000, 120000)
+    _add_data_row(db, upload.id, "GLIF", "7042", "Tenant B", "UnknownArt", 100, 5000)
+
+    rows = aggregate_g2(db, upload.id)
+    g = rows[0]
+    assert g.contractual_rent == 125000
+    assert g.gross_potential_income == 125000
+
+
+def test_g2_targeted_rent_by_use_type_equals_let_plus_vacant(db):
+    upload = _make_upload(db)
+    _add_data_row(db, upload.id, "GLIF", "7042", "T1", "Büro", 1000, 60000)
+    _add_data_row(
+        db, upload.id, "GLIF", "7042", "LEERSTAND", "Büro", 500, 0,
+        erv_monthly=2000,
+    )
+
+    rows = aggregate_g2(db, upload.id)
+    g = rows[0]
+    assert g.let_rent_office == 60000
+    assert g.vacant_rent_office == 24000
+    assert g.rent_office == g.let_rent_office + g.vacant_rent_office
+    assert g.gross_potential_income == 60000 + 24000
 
 
 def test_g2_reversion_none_without_summary(db):

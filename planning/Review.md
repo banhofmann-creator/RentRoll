@@ -889,3 +889,128 @@ Validation run:
 
 - `cmd /c npx eslint src/app/data/page.tsx` â†’ passed
 - Full frontend lint was not used for verification because the current repo-level ESLint run hits an unrelated permission error while scanning `frontend/.pytest_cache`.
+
+---
+
+## 2026-05-04 G2 Targeted Net Rent: Fallback Chain for Vacancies
+
+**Status:** Complete
+**Date:** 2026-05-04
+
+### What changed
+
+- **Aggregation** (`backend/app/core/aggregation.py`): Vacant units now contribute an *imputed* targeted net rent computed via a fallback chain — AM-ERV (col 36 × 12) → Market rent (col 35 × 12) → unit's own contract rent (col 30, typically 0). Previously vacant units used market rent only with no ERV preference and no fallback.
+- **Per-use-type targeted columns (54–65)** are now consistent with their let / vacant breakdown. Previously `rent_*` accumulated contract rent for all rows (so vacant office contributed 0 even when market or ERV existed), meaning col 54 = col 78 (let), independent of col 89 (vacant). Now col 54 = col 78 + col 89 by construction.
+- `g2.gross_potential_income` recomputed as `sum(rent_* across use types)` instead of `contractual_rent + total_vacant_rent`. Mathematically equivalent under the new semantics, but avoids confusion if a vacant row ever carries a non-zero contract rent (no double counting).
+- **Spec updates**:
+  - `planning/spec-columns.md` cols 51–65 and 89–99: documented the fallback chain and the per-use-type identity (`col 54 = col 78 + col 89`).
+  - `planning/spec-transforms.md`: rewrote the rent-by-use-type pseudocode to define `targeted_per_unit` and use it for cols 53, 54–65, 89–99.
+
+### Why this was needed
+
+User flagged that "Targeted Net Rent" should reflect the asset manager's targeted rental value for vacant space, not just market rent. The original spec (and code) used market rent for vacancy only, and never consulted AM-ERV — even though AM-ERV (the asset manager's expected rental value) is the more authoritative target. The fallback chain preserves robustness when ERV or market rent is missing.
+
+### Domain rules preserved
+
+- `CONTRACTUAL_RENT` (col 51) still uses actual contract rent only — unchanged.
+- `let_rent_*` (cols 78–88) still uses contract rent for occupied units — unchanged.
+- `LEERSTAND` exclusion from tenant counts, lease-expiry buckets, parking_let — unchanged.
+- ERV totals (cols 66–77) — unchanged (still SUM erv × 12 for all rows).
+
+### Test coverage
+
+**242 backend tests passing** (`pytest --tb=short -q`, 22.4 s).
+
+New tests in `backend/tests/test_aggregation.py`:
+- `test_g2_gross_potential_income_vacant_uses_market_when_no_erv` — fallback step 2 (no ERV → market).
+- `test_g2_gross_potential_income_vacant_prefers_erv_over_market` — fallback step 1 (ERV beats market).
+- `test_g2_gross_potential_income_vacant_falls_back_to_contract` — fallback step 3 (no ERV, no market → contract, typically 0).
+- `test_g2_targeted_rent_by_use_type_equals_let_plus_vacant` — verifies the `rent_* = let_rent_* + vacant_rent_*` identity.
+
+Existing test `test_g2_let_vs_vacant_rent` (market-only fallback) continues to pass under the new semantics.
+
+### Files changed
+
+- `backend/app/core/aggregation.py` — vacant-row branch + `gross_potential_income` recomputation.
+- `backend/tests/test_aggregation.py` — renamed existing GPI test, added 3 new tests for fallback chain.
+- `planning/spec-columns.md` — col 51–65 and 89–99 derivation rules.
+- `planning/spec-transforms.md` — rent-by-use-type pseudocode.
+
+### Codex review findings (2026-05-04, `planning/reviews/codex-review-20260504-211125.md`)
+
+- **[P2] GPI dropped rows with unmapped `unit_type`** — fixed by accumulating `g2.gross_potential_income` directly inside the per-row loop instead of summing `_RENT_ATTR.values()` afterward. The summation approach silently dropped any row whose `unit_type` was not a key in `_RENT_ATTR` (defensive against future CSV variants); the new direct accumulation includes them and remains identity-equal to `let + vacant` for mapped types. New test `test_g2_gross_potential_income_includes_unmapped_unit_type` guards the regression. Final test count: **243 passing**.
+- **[P1] Untracked CSV `backend/uploads/Mieterliste_1-Garbe (2).csv`** — pre-existing untracked file in the workspace, not introduced by this change. Flagged so it is not accidentally committed; recommend extending `.gitignore` to cover `/backend/uploads` (currently only `/uploads`) before any commit.
+
+### Deferred items
+
+- Existing real-data exports (if any have been generated) will not match new outputs — re-export expected after this change.
+- `.gitignore` does not cover `backend/uploads/` (only `uploads/`); raw rent-roll CSVs dropped there are not auto-ignored. Worth tightening separately.
+---
+
+## 2026-05-04 RR-1 Phase A: PPTX Refresh — token-mode infrastructure
+
+**Status:** Complete (Phase A)  
+**Date:** 2026-05-04
+
+### What was built
+
+- **Data model** (`backend/app/models/database.py`): Added `PptxRefreshJob` using the existing SQLAlchemy `Base`, JSON columns for proposals/confirmed mappings, audit fields, period linkage, source/output blob paths, and status lifecycle fields.
+- **KPI catalog** (`backend/app/core/kpi_catalog.py`): Added closed Phase A KPI enumeration for the nine portfolio KPIs exposed by analytics, German-locale deterministic formatting, and resolver logic that combines the existing `_csv_kpis()` and `_snapshot_kpis()` helpers for a reporting period.
+- **PPTX ingest** (`backend/app/parsers/pptx_ingestor.py`): Added run-level text extraction for text frames and table cells, best-effort font metadata capture, deterministic `{{kpi_id}}` token detection, and separate unknown-token surfacing.
+- **PPTX patcher** (`backend/app/core/pptx_patcher.py`): Added single-run token replacement that preserves run formatting by changing only `run.text`; documented the Phase C multi-run token strategy with a TODO.
+- **PPTX API** (`backend/app/api/pptx_refresh.py`, `backend/app/main.py`): Added `/api/pptx/upload`, `/api/pptx/{id}`, `/api/pptx/{id}/apply`, and `/api/pptx/{id}/download`. Upload persists source decks under `uploads/pptx_refresh/{id}/source.pptx`, background ingest stores token proposals, apply synchronously resolves/formats KPI values and writes `refreshed.pptx`, and download streams the refreshed deck.
+- **Frontend API + page** (`frontend/src/lib/api.ts`, `frontend/src/app/decks/page.tsx`, `frontend/src/app/layout.tsx`): Added typed PPTX refresh client functions, a GARBE-styled deck upload/token review/period selection/download page, draft-period DD-4 warnings, and a `Decks` nav link.
+- **Test collection guard** (`backend/pytest.ini`) and `.gitignore`: Restricted backend pytest collection to `tests/` so runtime upload/temp/export folders are not collected on Windows, and ignored backend runtime scratch/upload/log artifacts.
+
+### Test coverage
+
+**258 backend tests passing** (`cd backend && python -m pytest --tb=short -q`) — 243 existing + 15 new RR-1 Phase A tests.
+
+New coverage in `backend/tests/test_pptx_refresh.py`:
+- KPI catalog key coverage and deterministic formatting for money, percent, and integer values.
+- Synthetic PPTX ingest for text-frame tokens, table-cell tokens, and unknown out-of-catalog tokens.
+- Token patching for text frames and table cells, including preservation of surrounding text.
+- API upload/status flow, apply completion, draft period status audit capture, unknown KPI error state, and PPTX download response.
+
+Frontend validation:
+- `cd frontend && cmd /c npx tsc --noEmit` passed.
+- `cmd /c npx next build` was attempted but blocked by the environment's inability to fetch `Open Sans` from Google Fonts via `next/font`; no TypeScript errors were found.
+
+### Files changed
+
+```
+.gitignore
+backend/pytest.ini
+backend/app/models/database.py
+backend/app/core/kpi_catalog.py
+backend/app/core/pptx_patcher.py
+backend/app/parsers/pptx_ingestor.py
+backend/app/api/pptx_refresh.py
+backend/app/main.py
+backend/tests/test_pptx_refresh.py
+frontend/src/lib/api.ts
+frontend/src/app/decks/page.tsx
+frontend/src/app/layout.tsx
+planning/Review.md
+```
+
+### Codex review findings (2026-05-04, `planning/reviews/codex-review-20260504-220356.md`)
+
+- **[P2] `vacancy_rate` percent unit mismatch** — fixed. `_csv_kpis()` and `_snapshot_kpis()` return `vacancy_rate` already as a percent value (e.g. `5.32` for 5.32%). The original `format_value("percent")` auto-multiplied any input ≤ 1 by 100, so vacancy rates below 1% were inflated 100× (e.g. 0.5% rendered as `50,00 %`). The misleading test `test_format_value_percent` used `0.0532 → "5,32 %"`, which masked the bug. **Fix:** removed the auto-detection from `format_value`; `percent` now unambiguously expects a 0–100 value. Updated existing test to use `5.32 → "5,32 %"` (matching production data flow) and added `test_format_value_percent_below_one` (`0.5 → "0,5 %"`) as a regression guard. Final test count: **259 passing**.
+
+### Deferred items
+
+- Phase B: Claude resolver, scan endpoint, AI proposal review flow, and any Anthropic integration.
+- Phase C: chart data refresh, multi-run token repair, group-shape recursion, output-channel push integration, bulk endpoints, comparison slides, and multi-period deck support.
+- Trailing-zero stripping on percent (`5.00 %` becomes `5 %`). Cosmetic; revisit if it surfaces in real decks.
+- Per-token accept/reject UI on `/decks` page. Phase A auto-applies all detected `{{token}}` placeholders when the user clicks "Refresh deck"; the per-token UI lands with Phase B's proposal review screen (see DD-1 acceptance criterion partial in the RR-1 comment).
+
+### Pickup notes for next session
+
+- RR-1 is **In Arbeit** in Jira with Phase A done. Comment on the ticket lists which acceptance criteria are met vs. deferred.
+- Phase A prompt template lives at `planning/codex-rr1-phaseA-prompt.txt` — use as a structural reference when writing the Phase B prompt.
+- Phase B scope: `backend/app/core/pptx_kpi_resolver.py` (Claude tool-use), `POST /api/pptx/{id}/scan` endpoint, proposal review screen on `/decks` page, mocked-Anthropic tests. Existing token-mode path must keep working.
+- DD-1 (always confirm), DD-2 (no portfolio fallback for ambiguous scope), DD-3 (closed catalog, surface unknowns), DD-4 (draft banner) are anchored in the RR-1 ticket description and must guide Phase B implementation.
+- Uncommitted state at handoff: see `git status`. Phase A changes are not yet committed.
+
+Reference: https://banhofmann.atlassian.net/browse/RR-1

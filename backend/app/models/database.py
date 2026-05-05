@@ -282,6 +282,25 @@ class ReportingPeriod(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class PptxRefreshJob(Base):
+    __tablename__ = "pptx_refresh_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    original_blob_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    reporting_period_id: Mapped[int | None] = mapped_column(ForeignKey("reporting_periods.id"), nullable=True)
+    period_status_at_refresh: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="uploaded")
+    proposals_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    confirmed_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    output_filename: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    output_blob_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
 class SnapshotPropertyMaster(Base):
     __tablename__ = "snapshot_property_master"
 

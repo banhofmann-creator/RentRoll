@@ -1,0 +1,12 @@
+Fix AG Grid error #272 in frontend/src/app/master-data/properties/grid/page.tsx.
+
+AG Grid v35 requires explicit module registration. The fix is to add this near the top of the file (after the ag-grid imports, before the component):
+
+    import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+    ModuleRegistry.registerModules([AllCommunityModule]);
+
+IMPORTANT: Read the Next.js guide at node_modules/next/dist/docs/ before making changes — this project uses Next.js App Router with potentially breaking changes.
+
+Do NOT change any other files. Only modify frontend/src/app/master-data/properties/grid/page.tsx.
+
+After making the change, verify the frontend builds cleanly with: cd frontend && npx next build
