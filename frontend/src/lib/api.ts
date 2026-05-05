@@ -748,6 +748,43 @@ export interface PptxTokenProposal {
   span?: number[];
 }
 
+export type PptxAiProposalKind =
+  | "mapping"
+  | "ambiguous_scope"
+  | "unsupported_kpi"
+  | "skipped";
+
+export interface PptxAiProposal {
+  idx: number;
+  kind: PptxAiProposalKind;
+  address: Record<string, unknown>;
+  slide_idx: number;
+  slide_title?: string | null;
+  label_context?: string | null;
+  original_value: string;
+  kpi_id?: string | null;
+  scope?: string | null;
+  new_value?: string | null;
+  confidence?: number | null;
+  reasoning?: string | null;
+  candidate_kpi_id?: string | null;
+  label_observed?: string | null;
+}
+
+export interface PptxAiSummary {
+  candidates_total?: number;
+  mappings?: number;
+  ambiguous?: number;
+  unsupported?: number;
+  skipped?: number;
+}
+
+export interface PptxAiConfirmation {
+  idx: number;
+  kpi_id?: string;
+  scope_choice?: "portfolio" | "skip";
+}
+
 export interface PptxRefreshJob {
   id: number;
   status: string;
@@ -755,16 +792,23 @@ export interface PptxRefreshJob {
   output_filename?: string | null;
   error_message?: string | null;
   proposals?: {
+    mode?: string;
     tokens: Array<string | PptxTokenProposal>;
     unknown_tokens: string[];
+    ai_proposals?: PptxAiProposal[];
+    summary?: PptxAiSummary;
   };
   proposals_json?: {
     mode?: string;
     tokens?: PptxTokenProposal[];
     unknown_tokens?: string[];
+    proposals?: PptxAiProposal[];
+    summary?: PptxAiSummary;
+    available_kpis?: string[];
   } | null;
   confirmed_json?: unknown;
   period_status_at_refresh?: string | null;
+  reporting_period_id?: number | null;
 }
 
 export async function uploadPptxRefresh(
@@ -792,6 +836,21 @@ export async function getPptxRefreshJob(
   return res.json();
 }
 
+export async function scanPptxRefresh(
+  id: number,
+  periodId: number
+): Promise<PptxRefreshJob> {
+  const res = await fetch(
+    `${API_BASE}/api/pptx/${id}/scan?period_id=${periodId}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Scan failed" }));
+    throw new Error(err.detail || "Scan failed");
+  }
+  return res.json();
+}
+
 export async function applyPptxRefresh(
   id: number,
   periodId: number
@@ -800,6 +859,26 @@ export async function applyPptxRefresh(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ period_id: periodId, mappings: null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Apply failed" }));
+    throw new Error(err.detail || "Apply failed");
+  }
+  return res.json();
+}
+
+export async function applyPptxAiRefresh(
+  id: number,
+  periodId: number,
+  confirmations: PptxAiConfirmation[]
+): Promise<PptxRefreshJob> {
+  const res = await fetch(`${API_BASE}/api/pptx/${id}/apply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      period_id: periodId,
+      ai_confirmations: confirmations,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Apply failed" }));

@@ -1014,3 +1014,81 @@ planning/Review.md
 - Uncommitted state at handoff: see `git status`. Phase A changes are not yet committed.
 
 Reference: https://banhofmann.atlassian.net/browse/RR-1
+
+---
+
+## 2026-05-05 RR-1 Phase B: PPTX Refresh — AI KPI mapping
+
+**Status:** Complete (Phase B)
+**Date:** 2026-05-05
+
+### What was built
+
+- **AI resolver** (`backend/app/core/pptx_kpi_resolver.py`): New module. `collect_candidates()` extracts numeric-shaped runs from ingested text elements (filters out dates, free prose, and slide titles via `NUMERIC_VALUE_RE`), captures the closest preceding non-numeric label on the same slide as `label_context`, and the rest of the slide's prose as `neighborhood`. `resolve_with_ai()` sends one batched JSON-only Claude call (`claude-sonnet-4-6`) with the catalog narrowed to the period's available KPIs and a candidate list; parses a `{decisions: [...]}` response. Anthropic client is dependency-injected so tests can run without network.
+- **Decision kinds** (DD-2 / DD-3 enforcement): `mapping` (resolves to a portfolio KPI and pre-computes `new_value` via `format_value`), `ambiguous_scope` (no `new_value` is committed; user must pick `portfolio` scope and a `kpi_id` at apply time), `unsupported_kpi` (label outside catalog; tracked for v1.1 backlog), and `skipped`. A mapping that resolves to a KPI with no value for the selected period is automatically downgraded to `unsupported_kpi`.
+- **Scan endpoint** (`backend/app/api/pptx_refresh.py`): `POST /api/pptx/{id}/scan?period_id=...` schedules a background AI scan against the stored deck. While running, `status="scanning"`. On completion, `proposals_json` is replaced with `{mode: "ai", period_id, period_status, available_kpis, proposals, summary}` and `status="proposed"`.
+- **Apply extension**: `ApplyRequest` gained `ai_confirmations: list[AiConfirmation]`. Token-mode (`mappings`) and AI-mode (`ai_confirmations`) flow through separate selectors and a shared `_patch_and_finalize`. AI confirmations support `{idx, kpi_id?, scope_choice?}`; ambiguous proposals require `scope_choice="portfolio"` and a valid `kpi_id`, otherwise the apply fails closed (DD-2). Empty confirmation list also fails closed.
+- **Test seam**: `set_ai_client_override()` in `pptx_refresh.py` lets the test fixture inject a fake Anthropic client into the background-task path without monkeypatching imports.
+- **Frontend types + client** (`frontend/src/lib/api.ts`): Added `PptxAiProposal`, `PptxAiSummary`, `PptxAiConfirmation`, extended `PptxRefreshJob`. Added `scanPptxRefresh()` and `applyPptxAiRefresh()`.
+- **Frontend review UI** (`frontend/src/app/decks/page.tsx`): Token mode keeps its chip view + "Refresh deck (token mode)" button. New "Scan with AI for KPIs" button triggers the scan. AI proposals render in a review table with per-row Apply checkbox, KPI/scope display, scope picker (`skip` | `portfolio`) for ambiguous rows, KPI dropdown for portfolio scope, "Accept all mappings" / "Reject all" / "Re-run AI scan" bulk actions, and an "Apply N confirmed mappings" button. Draft-period banner (DD-4) is preserved across both modes.
+
+### Test coverage
+
+**273 backend tests passing** (`cd backend && python -m pytest --tb=short -q`) — 258 prior + 15 new RR-1 Phase B tests in `backend/tests/test_pptx_phase_b.py` (12 initial + 3 added for Codex P2 findings):
+
+- `test_collect_candidates_filters_dates_and_titles` — confirms slide titles, dates, and free-prose runs are not flagged as candidates.
+- `test_resolve_with_ai_mapping` — happy path; proposal carries pre-computed `new_value` from the catalog formatter.
+- `test_resolve_with_ai_ambiguous_scope` — DD-2; no `new_value` committed; user must disambiguate at apply time.
+- `test_resolve_with_ai_unsupported` — label outside catalog; `label_observed` recorded for backlog telemetry.
+- `test_resolve_with_ai_mapping_falls_back_when_value_missing` — defensive downgrade when AI picks a catalog KPI but the period has no value (e.g. `fair_value` on a draft period).
+- `test_resolve_with_ai_missing_decision_marked_skipped` — AI omits a decision → candidate is preserved as `skipped`, never silently mapped.
+- `test_scan_endpoint_runs_ai_and_apply_works` — end-to-end through the API: upload → scan → apply with `{idx}` → download; refreshed deck text contains the new value and no longer contains the old one.
+- `test_apply_ai_with_ambiguous_scope_skip_and_portfolio` — mixed apply: `scope_choice="skip"` drops one row while a confirmed mapping is applied.
+- `test_apply_ai_ambiguous_requires_kpi` — DD-2 hard guard: `scope_choice="portfolio"` without a `kpi_id` returns an error.
+- `test_apply_ai_no_confirmations_errors` — empty `ai_confirmations` is rejected (no silent no-op).
+- `test_scan_records_period_status_for_draft` — DD-4 audit; `period_status_at_refresh="draft"` is captured on the job.
+- `test_apply_ai_ambiguous_rejects_implicit_candidate_kpi` — Codex P2 regression; even when AI returns `candidate_kpi_id`, the user must commit to a KPI explicitly.
+- `test_apply_ai_re_resolves_for_apply_period` — Codex P2 regression; if the user changes the period selector between scan and apply, the deck is patched with the apply-period value, not the cached scan-period value.
+- `test_collect_candidates_currency_prefix` — Codex P2 regression; values like `EUR 12,500,000` and `€ 250 M` are now picked up as candidates.
+
+### Codex review findings (2026-05-05, `planning/reviews/codex-review-20260505-073741.md`)
+
+All three findings were P2 and have been fixed:
+1. **Implicit `candidate_kpi_id` fallback for ambiguous proposals** (`backend/app/api/pptx_refresh.py`). The apply path used to fall back to `proposal["candidate_kpi_id"]` if the user only sent `scope_choice="portfolio"` without a `kpi_id`. That bypassed DD-2's fail-closed contract. Fix: confirmation must carry an explicit `kpi_id`; otherwise apply errors out.
+2. **Stale `new_value` if period changes between scan and apply** (`backend/app/api/pptx_refresh.py`). Apply now re-resolves the value via `resolve_kpi_value(db, kpi_id, period.id)` and `format_value(...)` for both `mapping` and `ambiguous_scope` proposals so the deck always reflects the apply-time period that gets recorded on the job.
+3. **Currency-prefix values were filtered out of candidate extraction** (`backend/app/core/pptx_kpi_resolver.py`). `NUMERIC_VALUE_RE` now allows an optional currency prefix (`EUR`/`€`/etc.) and a stand-alone multiplier suffix (`M`/`Mio.`/`Mrd.`/`k`), so `EUR 12,500,000` and `€ 250 M` reach the AI scan.
+
+Frontend validation:
+- `cd frontend && cmd /c npx tsc --noEmit` passed.
+
+### Files changed
+
+```
+backend/app/core/pptx_kpi_resolver.py        (new)
+backend/app/api/pptx_refresh.py              (scan endpoint, AI apply path, test seam)
+backend/tests/test_pptx_phase_b.py           (new)
+frontend/src/lib/api.ts                      (AI types + client functions)
+frontend/src/app/decks/page.tsx              (review table + scan flow)
+planning/Review.md
+```
+
+### Deferred items
+
+- Phase C: chart data refresh (embedded XLSX), multi-run token repair, group-shape recursion, output-channel push integration, bulk endpoints, comparison slides, multi-period support.
+- Format-fidelity detector (Risk #1): Phase B uses the catalog's German default format. If the source deck uses `EUR 12,500,000` while the catalog says `12,5 M€`, the value will format-shift on refresh. Slated for Phase C.
+- AI prompt-cache hit metrics. Phase B sets `cache_control: ephemeral` on the system block but emits nothing to the audit log about cache reads/writes.
+- v1.1 catalog growth: collect `unsupported_kpi.label_observed` frequency over time and promote the top labels into `KPI_CATALOG`.
+
+### Pickup notes for next session
+
+- RR-1 acceptance criteria status:
+  - User can upload + pick period + AI scan → ✅ via `/decks` AI flow.
+  - Per-row accept/reject before any edit (DD-1) → ✅ checkbox column in review table.
+  - Scope picker for ambiguous proposals; never auto-resolve to portfolio (DD-2) → ✅ requires explicit `scope_choice="portfolio"` + valid `kpi_id`.
+  - Draft + finalized periods both supported, banner on draft (DD-4) → ✅ preserved from Phase A.
+  - Output preserves layout/fonts → ✅ same single-run patcher as Phase A.
+  - Phase B test coverage → ✅ 12 new tests, all green.
+  - 80% mapping accuracy on a sample deck → cannot validate in test suite (no live Claude); requires manual smoke against the synthetic deck.
+- Codex post-change handoff still pending (run `cmd /c .claude\codex-post-change-review.cmd`).
+
+Reference: https://banhofmann.atlassian.net/browse/RR-1
